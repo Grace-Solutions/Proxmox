@@ -1,207 +1,209 @@
 {
-    "globalSettings": {
-        "storagePool": "auto",
-        "downloadDirectory": "/tmp/proxmox-templates",
-        "imageCacheHours": 8,
-        "tags": [
-            "template",
-            "managed"
-        ],
-        "randomPassword": {
-            "enabled": true,
-            "length": 12,
-            "specialChars": "!@#$%^&*()-_=+[]{}|;:,.<>?"
-        },
-        "orchestratorPackages": [
-            "jq",
-            "libguestfs-tools",
-            "virt-v2v",
-            "apg",
-            "openssl",
-            "curl"
-        ],
-        "templatePackages": [
-            "qemu-guest-agent",
-            "curl",
-            "wget",
-            "snapd",
-            "net-tools",
-            "lsb-release",
-            "spice-webdavd",
-            "openssl",
-            "cifs-utils",
-            "nfs-common",
-            "whois",
-            "traceroute",
-            "btrfs-progs",
-            "zfsutils-linux",
-            "cloud-guest-utils",
-            "pcregrep",
-            "unattended-upgrades",
-            "python3",
-            "software-properties-common"
-        ],
-        "smbios": {
-            "manufacturer": "Proxmox",
-            "product": "Virtual-Machine",
-            "version": "1",
-            "sku": "KVM",
-            "family": "Proxmox"
-        },
-        "github": {
-            "personalAccessToken": "ghp_YourPersonalAccessToken",
-            "username": "your-github-username",
-            "repo": "your-repo-name",
-            "rootUrl": "https://api.github.com/repos",
-            "contents": "contents",
-            "query": "?ref=",
-            "branch": "main",
-            "mimeType": "application/vnd.github.v3.raw",
-            "downloadsDirectory": "/downloads/your-repo-name",
-            "installPowerShell": true,
-            "scripts": [
-                {
-                    "enabled": true,
-                    "repoPath": "Scripts/PostDeploymentConfiguration.sh",
-                    "description": "Post-deployment configuration script (bash)"
-                },
-                {
-                    "enabled": false,
-                    "repoPath": "Scripts/ConfigureWindows.ps1",
-                    "description": "PowerShell configuration script (requires installPowerShell: true). Works on Linux also."
-                }
-            ]
-        },
-        "cloudInit": {
-            "user": "admin",
-            "password": "YourSecurePassword123!",
-            "nameserver": "8.8.8.8",
-            "searchdomain": "example.local",
-            "sshkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample your-key-comment"
-        }
+  "globalSettings": {
+    "storagePool": "auto",
+    "downloadDirectory": "/tmp/proxmox-templates",
+    "imageCacheHours": 8,
+    "tags": [],
+    "randomPassword": {
+      "enabled": false,
+      "length": 12,
+      "specialChars": "!@#$%^&*()-_=+[]{}|;:,.<>?"
     },
-    "templates": [
+    "orchestratorPackages": [
+      "jq",
+      "libguestfs-tools",
+      "virt-v2v",
+      "apg",
+      "openssl",
+      "curl"
+    ],
+    "templatePackages": [
+      "qemu-guest-agent",
+      "curl",
+      "wget",
+      "snapd",
+      "net-tools",
+      "lsb-release",
+      "spice-webdavd",
+      "openssl",
+      "cifs-utils",
+      "nfs-common",
+      "whois",
+      "traceroute",
+      "btrfs-progs",
+      "zfsutils-linux",
+      "cloud-guest-utils",
+      "pcregrep",
+      "unattended-upgrades",
+      "python3",
+      "software-properties-common"
+    ],
+    "smbios": {
+      "manufacturer": "Proxmox",
+      "product": "Virtual Machine",
+      "version": "9",
+      "sku": "KVM",
+      "family": "Proxmox"
+    },
+    "github": {
+      "personalAccessToken": "",
+      "username": "your-github-username",
+      "repo": "your-repo-name",
+      "rootUrl": "https://api.github.com/repos",
+      "contents": "contents",
+      "query": "?ref=",
+      "branch": "main",
+      "mimeType": "application/vnd.github.v3.raw",
+      "downloadsDirectory": "/downloads/cloud-init",
+      "scripts": [
         {
-            "enabled": false,
-            "vmid": "9000",
-            "name": "Template-Ubuntu-LTS-2204",
-            "imageUrl": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
-            "osDiskSize": "64G",
-            "dataDiskSize": "128G",
-            "timezone": "America/New_York",
-            "vmHardware": {
-                "cores": 4,
-                "sockets": 1,
-                "memory": 4096,
-                "balloon": 2048,
-                "cpu": "x86-64-v3",
-                "machine": "q35",
-                "bios": "ovmf",
-                "scsihw": "virtio-scsi-single",
-                "ostype": "l26"
-            },
-            "network": [
-                {
-                    "bridge": "vmbr0",
-                    "firewall": 1,
-                    "vlan": "",
-                    "ip": "",
-                    "gateway": "",
-                    "ip6": "",
-                    "gateway6": ""
-                }
-            ],
-            "cloudInit": {},
-            "packages": [],
-            "virtCustomizeCommands": [],
-            "firstBootCommands": []
+          "enabled": true,
+          "repoPath": "Scripts/PostDeploymentConfiguration.sh",
+          "description": "Post-deployment configuration script for VM setup"
         },
         {
-            "enabled": true,
-            "vmid": "9001",
-            "name": "Template-Ubuntu-LTS-2404",
-            "imageUrl": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
-            "osDiskSize": "64G",
-            "dataDiskSize": "128G",
-            "timezone": "America/New_York",
-            "vmHardware": {
-                "cores": 4,
-                "sockets": 1,
-                "memory": 4096,
-                "balloon": 2048,
-                "cpu": "x86-64-v3",
-                "machine": "q35",
-                "bios": "ovmf",
-                "scsihw": "virtio-scsi-single",
-                "ostype": "l26"
-            },
-            "network": [
-                {
-                    "bridge": "vmbr0",
-                    "firewall": 1,
-                    "vlan": "20",
-                    "ip": "",
-                    "gateway": "",
-                    "ip6": "",
-                    "gateway6": ""
-                }
-            ],
-            "cloudInit": {},
-            "packages": ["docker.io"],
-            "virtCustomizeCommands": [],
-            "firstBootCommands": [
-                "systemctl enable docker",
-                "systemctl start docker"
-            ]
-        },
-        {
-            "enabled": false,
-            "vmid": "9002",
-            "name": "Template-Ubuntu-Static-IP-Example",
-            "imageUrl": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
-            "osDiskSize": "64G",
-            "dataDiskSize": "128G",
-            "timezone": "America/New_York",
-            "tags": ["ubuntu", "static-ip"],
-            "installPowerShell": false,
-            "github": {
-                "enabled": false
-            },
-            "vmHardware": {
-                "cores": 4,
-                "sockets": 1,
-                "memory": 4096,
-                "balloon": 2048,
-                "cpu": "x86-64-v3",
-                "machine": "q35",
-                "bios": "ovmf",
-                "scsihw": "virtio-scsi-single",
-                "ostype": "l26"
-            },
-            "network": [
-                {
-                    "bridge": "vmbr0",
-                    "firewall": 1,
-                    "vlan": "",
-                    "ip": "192.168.1.100/24",
-                    "gateway": "192.168.1.1",
-                    "ip6": "",
-                    "gateway6": ""
-                },
-                {
-                    "bridge": "vmbr1",
-                    "firewall": 1,
-                    "vlan": "",
-                    "ip": "10.0.0.100/24",
-                    "gateway": "",
-                    "ip6": "",
-                    "gateway6": ""
-                }
-            ],
-            "cloudInit": {},
-            "packages": [],
-            "virtCustomizeCommands": [],
-            "firstBootCommands": []
+          "enabled": false,
+          "repoPath": "Scripts/ConfigureWindows.ps1",
+          "description": "PowerShell configuration script (requires installPowerShell: true)"
         }
-    ]
+      ]
+    },
+    "cloudInit": {
+      "user": "admin",
+      "password": "changeme",
+      "nameserver": "8.8.8.8",
+      "searchdomain": "example.com",
+      "sshkey": ""
+    }
+  },
+  "templates": [
+    {
+      "enabled": false,
+      "vmid": "9000",
+      "name": "Template-Ubuntu-LTS-2204",
+      "imageUrl": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
+      "osDiskSize": "64G",
+      "dataDiskSize": "128G",
+      "timezone": "America/New_York",
+      "tags": [],
+      "installPowerShell": true,
+      "github": {"enabled": true},
+      "vmHardware": {
+        "cores": 16,
+        "sockets": 1,
+        "memory": 8192,
+        "balloon": 4096,
+        "cpu": "x86-64-v3",
+        "machine": "q35",
+        "bios": "ovmf",
+        "scsihw": "virtio-scsi-single",
+        "ostype": "l26"
+      },
+      "network": [
+        {
+          "firewall": 1,
+          "bridge": "vmbr0",
+          "gateway": "",
+          "ip6": "",
+          "gateway6": "",
+          "ip": "",
+          "vlan": "20"
+        }
+      ],
+      "cloudInit": {},
+      "packages": [],
+      "virtCustomizeCommands": [
+        "echo 'Example: This runs during image customization'",
+        "touch /etc/template-marker-9000"
+      ],
+      "firstBootCommands": [
+        "echo 'Example: This runs on first boot of cloned VM'",
+        "systemctl restart networking"
+      ]
+    },
+    {
+      "enabled": true,
+      "vmid": "9001",
+      "name": "Template-Ubuntu-LTS-2404",
+      "imageUrl": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+      "osDiskSize": "64G",
+      "dataDiskSize": "128G",
+      "timezone": "America/New_York",
+      "tags": ["ubuntu", "lts", "v24.04"],
+      "installPowerShell": true,
+      "github": {"enabled": true},
+      "vmHardware": {
+        "cores": 16,
+        "sockets": 1,
+        "memory": 8192,
+        "balloon": 4096,
+        "cpu": "x86-64-v3",
+        "machine": "q35",
+        "bios": "ovmf",
+        "scsihw": "virtio-scsi-single",
+        "ostype": "l26"
+      },
+      "network": [
+        {
+          "firewall": 1,
+          "bridge": "vmbr0",
+          "gateway": "",
+          "ip6": "",
+          "gateway6": "",
+          "ip": "",
+          "vlan": "20"
+        }
+      ],
+      "cloudInit": {},
+      "packages": ["docker.io"],
+      "virtCustomizeCommands": [],
+      "firstBootCommands": [
+        "systemctl enable docker",
+        "systemctl start docker"
+      ]
+    },
+    {
+      "enabled": false,
+      "vmid": "9002",
+      "name": "Template-Debian-12",
+      "imageUrl": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2",
+      "osDiskSize": "64G",
+      "dataDiskSize": "128G",
+      "timezone": "America/New_York",
+      "tags": [],
+      "installPowerShell": true,
+      "github": {"enabled": true},
+      "vmHardware": {
+        "cores": 16,
+        "sockets": 1,
+        "memory": 8192,
+        "balloon": 4096,
+        "cpu": "x86-64-v3",
+        "machine": "q35",
+        "bios": "ovmf",
+        "scsihw": "virtio-scsi-single",
+        "ostype": "l26"
+      },
+      "network": [
+        {
+          "firewall": 1,
+          "bridge": "vmbr0",
+          "gateway": "",
+          "ip6": "",
+          "gateway6": "",
+          "ip": "",
+          "vlan": "20"
+        }
+      ],
+      "cloudInit": {},
+      "packages": ["htop", "iotop"],
+      "virtCustomizeCommands": [
+        "mkdir -p /opt/scripts",
+        "chmod 755 /opt/scripts"
+      ],
+      "firstBootCommands": [
+        "apt-get update && apt-get upgrade -y"
+      ]
+    }
+  ]
 }
