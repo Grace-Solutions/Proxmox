@@ -61,50 +61,46 @@ Copy `Create-ProxmoxTemplate.json.example` to `Create-ProxmoxTemplate.json` and 
 
 ### Complete Example
 
+See `Create-ProxmoxTemplate.json.example` for a full working configuration. Key structure:
+
 ```json
 {
   "globalSettings": {
     "storagePool": "auto",
     "downloadDirectory": "/tmp/proxmox-templates",
     "imageCacheHours": 8,
-    "tags": ["template", "linux", "managed"],
+    "tags": [],
     "randomPassword": {
-      "enabled": true,
-      "length": 16,
-      "specialChars": "!@#$%^&*()-_=+"
+      "enabled": false,
+      "length": 12,
+      "specialChars": "!@#$%^&*()-_=+[]{}|;:,.<>?"
     },
-    "orchestratorPackages": ["jq", "libguestfs-tools", "curl"],
-    "templatePackages": ["qemu-guest-agent", "curl", "wget", "htop"],
+    "orchestratorPackages": ["jq", "libguestfs-tools", "virt-v2v", "apg", "openssl", "curl"],
+    "templatePackages": ["qemu-guest-agent", "curl", "wget", "snapd", "..."],
     "smbios": {
-      "manufacturer": "My Organization",
+      "manufacturer": "Proxmox",
       "product": "Virtual Machine",
-      "version": "1.0",
-      "sku": "VM-001",
-      "family": "Server"
+      "version": "9",
+      "sku": "KVM",
+      "family": "Proxmox"
     },
     "github": {
-        "personalAccessToken": "ghp_YourPersonalAccessToken_Or_Blank_If_Public",
-        "username": "your-github-username",
-        "repo": "your-repo-name",
-        "rootUrl": "https://api.github.com/repos",
-        "contents": "contents",
-        "query": "?ref=",
-        "branch": "main",
-        "mimeType": "application/vnd.github.v3.raw",
-        "downloadsDirectory": "/downloads/your-repo-name",
-        "installPowerShell": true,
-        "scripts": [
-            {
-                "enabled": true,
-                "repoPath": "Scripts/PostDeploymentConfiguration.sh",
-                "description": "Post-deployment configuration script (bash)"
-            },
-            {
-                "enabled": false,
-                "repoPath": "Scripts/ConfigureWindows.ps1",
-                "description": "PowerShell configuration script (requires installPowerShell: true). Powershell 7 works on Linux also if the code is written in a platform agnostic fashion."
-            }
-        ]
+      "personalAccessToken": "",
+      "username": "your-github-username",
+      "repo": "your-repo-name",
+      "rootUrl": "https://api.github.com/repos",
+      "contents": "contents",
+      "query": "?ref=",
+      "branch": "main",
+      "mimeType": "application/vnd.github.v3.raw",
+      "downloadsDirectory": "/downloads/cloud-init",
+      "scripts": [
+        {
+          "enabled": true,
+          "repoPath": "Scripts/PostDeploymentConfiguration.sh",
+          "description": "Post-deployment configuration script for VM setup"
+        }
+      ]
     },
     "cloudInit": {
       "user": "admin",
@@ -117,17 +113,17 @@ Copy `Create-ProxmoxTemplate.json.example` to `Create-ProxmoxTemplate.json` and 
   "templates": [
     {
       "enabled": true,
-      "vmid": "9000",
-      "name": "Template-Ubuntu-2404-LTS",
+      "vmid": "9001",
+      "name": "Template-Ubuntu-LTS-2404",
       "imageUrl": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
       "osDiskSize": "64G",
       "dataDiskSize": "128G",
       "timezone": "America/New_York",
-      "tags": ["ubuntu", "v24.04", "lts", "production"],
+      "tags": ["ubuntu", "lts", "v24.04"],
       "installPowerShell": true,
       "github": {"enabled": true},
       "vmHardware": {
-        "cores": 4,
+        "cores": 16,
         "sockets": 1,
         "memory": 8192,
         "balloon": 4096,
@@ -139,19 +135,19 @@ Copy `Create-ProxmoxTemplate.json.example` to `Create-ProxmoxTemplate.json` and 
       },
       "network": [
         {
-          "bridge": "vmbr0",
           "firewall": 1,
-          "vlan": "10",
-          "ip": "",
+          "bridge": "vmbr0",
           "gateway": "",
           "ip6": "",
-          "gateway6": ""
+          "gateway6": "",
+          "ip": "",
+          "vlan": "20"
         }
       ],
       "cloudInit": {},
-      "packages": ["nginx", "docker.io"],
+      "packages": ["docker.io"],
       "virtCustomizeCommands": [],
-      "firstBootCommands": ["apt-get update && apt-get upgrade -y"]
+      "firstBootCommands": ["systemctl enable docker", "systemctl start docker"]
     }
   ]
 }
