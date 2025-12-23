@@ -83,17 +83,28 @@ Copy `Create-ProxmoxTemplate.json.example` to `Create-ProxmoxTemplate.json` and 
       "family": "Server"
     },
     "github": {
-      "personalAccessToken": "",
-      "username": "your-username",
-      "repo": "your-repo",
-      "branch": "main",
-      "scripts": [
-        {
-          "enabled": true,
-          "repoPath": "Scripts/Setup.sh",
-          "description": "Initial setup script"
-        }
-      ]
+        "personalAccessToken": "ghp_YourPersonalAccessToken_Or_Blank_If_Public",
+        "username": "your-github-username",
+        "repo": "your-repo-name",
+        "rootUrl": "https://api.github.com/repos",
+        "contents": "contents",
+        "query": "?ref=",
+        "branch": "main",
+        "mimeType": "application/vnd.github.v3.raw",
+        "downloadsDirectory": "/downloads/your-repo-name",
+        "installPowerShell": true,
+        "scripts": [
+            {
+                "enabled": true,
+                "repoPath": "Scripts/PostDeploymentConfiguration.sh",
+                "description": "Post-deployment configuration script (bash)"
+            },
+            {
+                "enabled": false,
+                "repoPath": "Scripts/ConfigureWindows.ps1",
+                "description": "PowerShell configuration script (requires installPowerShell: true). Powershell 7 works on Linux also if the code is written in a platform agnostic fashion."
+            }
+        ]
     },
     "cloudInit": {
       "user": "admin",
