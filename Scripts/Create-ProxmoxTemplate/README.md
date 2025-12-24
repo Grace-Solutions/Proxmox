@@ -13,7 +13,7 @@ Automated creation of Proxmox VM templates from cloud images with full customiza
 - **VirtIO RNG**: Hardware random number generator for improved entropy
 - **NUMA**: Non-Uniform Memory Access enabled for better multi-socket performance
 - **SPICE Enhancements**: Folder sharing and video streaming enabled by default
-- **VM Firewall**: Pre-configured firewall with RFC1918, RFC6598, and public internet rules
+- **iptables Firewall**: First-boot iptables rules for outbound internet, RFC1918/RFC6598 east-west, and inbound protection
 - **Dynamic Tags**: Automatic tagging with template type, OS, version, and features
 - **GitHub Script Integration**: Download and execute scripts from private GitHub repos on first boot
 - **Cloud-Init Configuration**: Full cloud-init support with user, password, SSH keys, network settings
@@ -98,6 +98,7 @@ See `Create-ProxmoxTemplate.json.example` for a full working configuration. Key 
         {
           "enabled": true,
           "repoPath": "Scripts/PostDeploymentConfiguration.sh",
+          "params": "--environment production --verbose",
           "description": "Post-deployment configuration script for VM setup"
         }
       ]
@@ -135,7 +136,7 @@ See `Create-ProxmoxTemplate.json.example` for a full working configuration. Key 
       },
       "network": [
         {
-          "firewall": 1,
+          "firewall": 0,
           "bridge": "vmbr0",
           "gateway": "",
           "ip6": "",
@@ -147,7 +148,11 @@ See `Create-ProxmoxTemplate.json.example` for a full working configuration. Key 
       "cloudInit": {},
       "packages": ["docker.io"],
       "virtCustomizeCommands": [],
-      "firstBootCommands": ["systemctl enable docker", "systemctl start docker"]
+      "firstBootCommands": [
+        "iptables -A INPUT -p tcp --dport 80 -j ACCEPT",
+        "iptables -A INPUT -p tcp --dport 443 -j ACCEPT",
+        "iptables-save > /etc/iptables/rules.v4"
+      ]
     }
   ]
 }
@@ -226,7 +231,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
 | Field | Description | Default |
 |-------|-------------|---------|
 | `bridge` | Proxmox bridge (e.g., "vmbr0") | "vmbr0" |
-| `firewall` | Enable firewall (0 or 1) | 1 |
+| `firewall` | Enable Proxmox VM-level firewall (0 or 1) | 0 |
 | `vlan` | VLAN tag (optional) | "" |
 | `ip` | Static IPv4 in CIDR format (e.g., "192.168.1.100/24") | "" (DHCP) |
 | `gateway` | IPv4 gateway (optional, used with static IP) | "" |
@@ -240,7 +245,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
 "network": [
     {
         "bridge": "vmbr0",
-        "firewall": 1,
+        "firewall": 0,
         "vlan": "",
         "ip": "192.168.1.100/24",
         "gateway": "192.168.1.1",
@@ -255,7 +260,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
 "network": [
     {
         "bridge": "vmbr0",
-        "firewall": 1,
+        "firewall": 0,
         "vlan": "",
         "ip": "192.168.1.100/24",
         "gateway": "192.168.1.1",
@@ -264,7 +269,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
     },
     {
         "bridge": "vmbr1",
-        "firewall": 1,
+        "firewall": 0,
         "vlan": "100",
         "ip": "",
         "gateway": "",
@@ -309,11 +314,13 @@ Download and execute scripts from GitHub on first boot. Supports both `.sh` (bas
         {
             "enabled": true,
             "repoPath": "Scripts/PostDeploymentConfiguration.sh",
+            "params": "--environment production --verbose",
             "description": "Bash configuration script"
         },
         {
             "enabled": true,
             "repoPath": "Scripts/Configure.ps1",
+            "params": "-Environment 'Production' -Verbose",
             "description": "PowerShell script"
         }
     ]
@@ -331,6 +338,7 @@ Download and execute scripts from GitHub on first boot. Supports both `.sh` (bas
 |-------|-------------|
 | `enabled` | Process this script (true/false) |
 | `repoPath` | Path to script in GitHub repo |
+| `params` | Command-line arguments to pass to the script (optional) |
 | `description` | Description for logging |
 
 **Per-Template Settings:**
@@ -458,42 +466,58 @@ Full list: `timedatectl list-timezones`
 | AlmaLinux 9 | `https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2` |
 | Fedora Cloud 39 | `https://download.fedoraproject.org/pub/fedora/linux/releases/39/Cloud/x86_64/images/Fedora-Cloud-Base-39-1.5.x86_64.qcow2` |
 
-## VM Firewall
+## iptables Firewall
 
-Each template is provisioned with a comprehensive VM-level firewall configuration. The firewall state (enabled/disabled) is determined by the network adapter `firewall` setting:
+Each template is configured with iptables firewall rules on first boot. The Proxmox VM-level firewall is **disabled** by default (`firewall: 0` on network adapters) - security is handled at the OS level via iptables.
 
-- If **any** network adapter has `firewall: 1`, the VM firewall is **enabled**
-- If **all** network adapters have `firewall: 0`, the VM firewall is **disabled** but rules are still created (ready to enable later)
+### Default Chain Policies
 
-### Firewall Options
+| Chain | Policy | Description |
+|-------|--------|-------------|
+| INPUT | DROP | Deny all inbound by default |
+| FORWARD | DROP | Deny all forwarding by default |
+| OUTPUT | DROP | Deny all outbound by default (explicit rules allow traffic) |
 
-| Option | Value | Description |
-|--------|-------|-------------|
-| `enable` | 0 or 1 | Firewall state (based on network adapter settings) |
-| `policy_in` | DROP | Default deny inbound |
-| `policy_out` | DROP | Default deny outbound |
-| `log_level_in` | info | Log denied inbound traffic |
+### iptables Rules (Applied on First Boot)
 
-### IPSets
+| Chain | Rule | Description |
+|-------|------|-------------|
+| INPUT/OUTPUT | `-i lo` / `-o lo` | Allow loopback interface |
+| INPUT/OUTPUT | `-m conntrack --ctstate ESTABLISHED,RELATED` | Allow established/related connections |
+| INPUT/OUTPUT | `-s/-d 10.0.0.0/8` | Allow RFC1918 Class A (east-west) |
+| INPUT/OUTPUT | `-s/-d 172.16.0.0/12` | Allow RFC1918 Class B (east-west) |
+| INPUT/OUTPUT | `-s/-d 192.168.0.0/16` | Allow RFC1918 Class C (east-west) |
+| INPUT/OUTPUT | `-s/-d 100.64.0.0/10` | Allow RFC6598 CGNAT (east-west) |
+| INPUT/OUTPUT | `-p icmp` | Allow ICMP (ping) |
+| OUTPUT | `-j ACCEPT` | Allow all outbound to internet (public routable) |
 
-| IPSet | Description |
-|-------|-------------|
-| `rfc1918` | RFC 1918 private address space (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) |
-| `rfc6598` | RFC 6598 CGNAT address space (100.64.0.0/10) |
-| `public_internet` | All public routable IPv4 addresses |
+### Opening Additional Ports
 
-### Firewall Rules
+Use `firstBootCommands` to open specific inbound ports for services:
 
-| Direction | Protocol | Port | Destination | Description |
-|-----------|----------|------|-------------|-------------|
-| IN/OUT | any | any | +rfc1918 | Allow RFC1918 private network traffic |
-| IN/OUT | any | any | +rfc6598 | Allow RFC6598 CGNAT traffic |
-| OUT | TCP | 80 | +public_internet | Allow HTTP to public internet |
-| OUT | TCP | 443 | +public_internet | Allow HTTPS to public internet |
-| IN/OUT | ICMP | any | any | Allow ICMP (ping) |
-| IN/OUT | UDP | 67:68 | any | Allow DHCP |
-| IN/OUT | TCP/UDP | 53 | any | Allow DNS |
-| IN | TCP | 22 | any | Allow SSH inbound |
+```json
+"firstBootCommands": [
+    "iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT",
+    "iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT",
+    "iptables -I INPUT 1 -p tcp --dport 9000 -j ACCEPT",
+    "iptables-save > /etc/iptables/rules.v4"
+]
+```
+
+**Note:** Use `-I INPUT 1` to insert rules at the top of the chain (before the DROP rule).
+
+### Cluster-Level Firewall Objects
+
+The script also creates shared IPSets and Aliases at the Proxmox cluster level (`/etc/pve/firewall/cluster.fw`) for reference:
+
+| Type | Name | Value |
+|------|------|-------|
+| IPSet | `rfc1918` | 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 |
+| IPSet | `rfc6598` | 100.64.0.0/10 |
+| Alias | `rfc1918_class_a` | 10.0.0.0/8 |
+| Alias | `rfc1918_class_b` | 172.16.0.0/12 |
+| Alias | `rfc1918_class_c` | 192.168.0.0/16 |
+| Alias | `rfc6598_cgnat` | 100.64.0.0/10 |
 
 ## Hardware Devices
 
