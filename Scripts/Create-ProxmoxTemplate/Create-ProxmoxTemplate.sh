@@ -615,45 +615,17 @@ customize_image() {
         virt-customize -a "$image_file" --firstboot-command "snap install powershell --classic"
     fi
 
-    # Configure iptables firewall rules (before custom first boot commands)
-    # Rules: Loopback, Established, RFC1918/6598 east-west, Internet outbound, ICMP, Drop other inbound
-    # Note: iptables-persistent should be in globalSettings.templatePackages for persistence
-    log_info "Adding iptables firewall configuration as first boot commands"
-
-    # Flush existing rules and set chain policies
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -F && iptables -X && iptables -P INPUT DROP && iptables -P FORWARD DROP && iptables -P OUTPUT DROP"
-
-    # Allow loopback interface (INPUT and OUTPUT)
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A INPUT -i lo -j ACCEPT && iptables -A OUTPUT -o lo -j ACCEPT"
-
-    # Allow established and related connections (INPUT and OUTPUT)
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT && iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
-
-    # Allow all RFC1918 inbound and outbound (east-west private network traffic)
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A INPUT -s 10.0.0.0/8 -j ACCEPT && iptables -A INPUT -s 172.16.0.0/12 -j ACCEPT && iptables -A INPUT -s 192.168.0.0/16 -j ACCEPT"
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT && iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT && iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT"
-
-    # Allow all RFC6598 CGNAT inbound and outbound (east-west CGNAT traffic)
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A INPUT -s 100.64.0.0/10 -j ACCEPT && iptables -A OUTPUT -d 100.64.0.0/10 -j ACCEPT"
-
-    # Allow ICMP (ping) inbound and outbound
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A INPUT -p icmp -j ACCEPT && iptables -A OUTPUT -p icmp -j ACCEPT"
-
-    # Allow all outbound to internet (public routable addresses - everything not RFC1918/6598)
-    # This covers HTTP, HTTPS, DNS, NTP, and all other internet-bound traffic
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables -A OUTPUT -j ACCEPT"
-
-    # Save iptables rules for persistence across reboots
-    virt-customize -a "$image_file" --firstboot-command \
-        "iptables-save > /etc/iptables/rules.v4"
+    # Install fwutil firewall utility script
+    # This script provides comprehensive firewall management with Docker/container awareness
+    # Usage: fwutil --public-tcp-ports 80,443,8080
+    local fwutil_source="${SCRIPT_DIR}/fwutil.sh"
+    if [[ -f "$fwutil_source" ]]; then
+        log_info "Installing fwutil firewall utility to /usr/local/bin/fwutil"
+        virt-customize -a "$image_file" --upload "${fwutil_source}:/usr/local/bin/fwutil"
+        virt-customize -a "$image_file" --run-command "chmod +x /usr/local/bin/fwutil"
+    else
+        log_warn "fwutil.sh not found at ${fwutil_source} - skipping firewall utility installation"
+    fi
 
     # Add per-template first boot commands
     if [[ ${#T_FIRSTBOOT_CMDS[@]} -gt 0 ]]; then
@@ -1026,41 +998,41 @@ configure_cloudinit() {
     qm set "$vmid" --boot "order=scsi1;scsi0;net0"
 }
 
-# Configure cluster-level firewall IPSets and Aliases (idempotent - shared across all VMs)
-# This creates reusable network definitions at the datacenter/cluster level
-configure_cluster_firewall() {
-    log_info "Configuring cluster-level firewall IPSets and Aliases (idempotent)"
+# Configure host-level firewall IPSets and Aliases (idempotent - shared across all VMs)
+# This creates reusable network definitions at the host level (works for standalone and cluster)
+configure_host_firewall() {
+    log_info "Configuring host-level firewall IPSets and Aliases (idempotent)"
 
     local fw_dir="/etc/pve/firewall"
-    local cluster_fw="${fw_dir}/cluster.fw"
+    local host_fw="${fw_dir}/host.fw"
 
     # Ensure firewall directory exists
     mkdir -p "$fw_dir"
 
-    # Check if cluster.fw exists and has our marker
-    if [[ -f "$cluster_fw" ]] && grep -q "# Managed by Proxmox Template Creator" "$cluster_fw"; then
-        log_debug "Cluster firewall already configured (skipping)"
+    # Check if host.fw exists and has our marker
+    if [[ -f "$host_fw" ]] && grep -q "# Managed by Proxmox Template Creator" "$host_fw"; then
+        log_debug "Host firewall already configured (skipping)"
         return 0
     fi
 
-    # Backup existing cluster.fw if it exists and doesn't have our marker
-    if [[ -f "$cluster_fw" ]]; then
-        log_warn "Backing up existing cluster.fw to cluster.fw.bak"
-        cp "$cluster_fw" "${cluster_fw}.bak"
+    # Backup existing host.fw if it exists and doesn't have our marker
+    if [[ -f "$host_fw" ]]; then
+        log_warn "Backing up existing host.fw to host.fw.bak"
+        cp "$host_fw" "${host_fw}.bak"
     fi
 
     # -------------------------------------------------------------------------
-    # Create cluster-level firewall config with IPSets and Aliases
-    # These are shared across all VMs and can be referenced in VM-level rules
+    # Create host-level firewall config with IPSets and Aliases
+    # These are shared across all VMs on this host and can be referenced in VM-level rules
     # -------------------------------------------------------------------------
 
-    cat > "$cluster_fw" << 'CLUSTERFW'
+    cat > "$host_fw" << 'HOSTFW'
 # Managed by Proxmox Template Creator
-# Cluster-level firewall configuration with reusable IPSets and Aliases
-# These definitions are shared across all VMs in the cluster
+# Host-level firewall configuration with reusable IPSets and Aliases
+# These definitions are shared across all VMs on this Proxmox host
 
 [OPTIONS]
-enable: 0
+enable: 1
 
 [ALIASES]
 # RFC 1918 Private Address Space Aliases
@@ -1077,9 +1049,9 @@ rfc6598_cgnat 100.64.0.0/10 # RFC6598 Carrier-Grade NAT (100.64.0.0 - 100.127.25
 
 [IPSET rfc6598] # RFC 6598 CGNAT Address Space - Carrier-Grade NAT
 100.64.0.0/10 # CGNAT Range (100.64.0.0 - 100.127.255.255)
-CLUSTERFW
+HOSTFW
 
-    log_info "Cluster-level firewall IPSets and Aliases configured"
+    log_info "Host-level firewall IPSets and Aliases configured"
 }
 
 # Generate markdown notes for the VM
@@ -1164,15 +1136,12 @@ EOF
     echo "" >> "$notes_file"
     echo "- SSH root login is **enabled**" >> "$notes_file"
     echo "- Password authentication is **enabled**" >> "$notes_file"
-    echo "- **iptables firewall** configured on first boot:" >> "$notes_file"
-    echo "  - Loopback: INPUT/OUTPUT allowed" >> "$notes_file"
-    echo "  - Established/Related: INPUT/OUTPUT allowed" >> "$notes_file"
-    echo "  - RFC1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16): INPUT/OUTPUT allowed" >> "$notes_file"
-    echo "  - RFC6598 (100.64.0.0/10): INPUT/OUTPUT allowed" >> "$notes_file"
-    echo "  - ICMP: INPUT/OUTPUT allowed" >> "$notes_file"
-    echo "  - Internet outbound: OUTPUT allowed (all public routable)" >> "$notes_file"
-    echo "  - All other inbound: **DROPPED**" >> "$notes_file"
-    echo "  - Open ports: \`iptables -I INPUT 1 -p tcp --dport PORT -j ACCEPT && iptables-save > /etc/iptables/rules.v4\`" >> "$notes_file"
+    echo "- **fwutil** firewall utility installed at \`/usr/local/bin/fwutil\`" >> "$notes_file"
+    echo "  - Docker/container aware (preserves container networking)" >> "$notes_file"
+    echo "  - RFC1918/RFC6598 private networks: unrestricted access" >> "$notes_file"
+    echo "  - SSH: restricted to private/CGNAT networks only" >> "$notes_file"
+    echo "  - Public ports: configurable via \`--public-tcp-ports\`" >> "$notes_file"
+    echo "  - Usage: \`fwutil --public-tcp-ports 80,443,8080\`" >> "$notes_file"
     echo "- QEMU guest agent is **installed** (on first boot)" >> "$notes_file"
     if [[ "$T_INSTALL_POWERSHELL" == "true" ]]; then
         echo "- PowerShell is **installed** (via snap)" >> "$notes_file"
@@ -1349,8 +1318,8 @@ process_template() {
     # Configure cloud-init
     configure_cloudinit "$vmid" "$is_new"
 
-    # Configure cluster-level firewall IPSets (idempotent - only runs once)
-    configure_cluster_firewall
+    # Configure host-level firewall IPSets (idempotent - only runs once)
+    configure_host_firewall
 
     # Set dynamic tags
     set_vm_tags "$vmid" "$template_name" "$url"
