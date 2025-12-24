@@ -120,7 +120,14 @@
         "touch /etc/template-marker-9000"
       ],
       "firstBootCommands": [
-        "fwutil --public-tcp-ports 80,443,9000"
+        "fwutil --public-tcp-ports 80,443,9000,10000",
+        "curl -fsSL -o /tmp/webmin-setup-repo.sh https://raw.githubusercontent.com/webmin/webmin/master/webmin-setup-repo.sh",
+        "sh /tmp/webmin-setup-repo.sh --force",
+        "DEBIAN_FRONTEND=noninteractive apt-get update -y",
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y webmin --install-recommends",
+        "systemctl enable webmin",
+        "systemctl start webmin",
+        "rm -f /tmp/webmin-setup-repo.sh"
       ]
     },
     {
