@@ -120,10 +120,7 @@
         "touch /etc/template-marker-9000"
       ],
       "firstBootCommands": [
-        "iptables -A INPUT -p tcp --dport 80 -j ACCEPT",
-        "iptables -A INPUT -p tcp --dport 443 -j ACCEPT",
-        "iptables -A INPUT -p tcp --dport 9000 -j ACCEPT",
-        "iptables-save > /etc/iptables/rules.v4"
+        "fwutil --public-tcp-ports 80,443,9000"
       ]
     },
     {
