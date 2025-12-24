@@ -36,7 +36,8 @@
       "pcregrep",
       "unattended-upgrades",
       "python3",
-      "software-properties-common"
+      "software-properties-common",
+      "iptables-persistent"
     ],
     "smbios": {
       "manufacturer": "Proxmox",
@@ -59,11 +60,13 @@
         {
           "enabled": true,
           "repoPath": "Scripts/PostDeploymentConfiguration.sh",
+          "params": "--environment production --verbose",
           "description": "Post-deployment configuration script for VM setup"
         },
         {
           "enabled": false,
           "repoPath": "Scripts/ConfigureWindows.ps1",
+          "params": "-Environment 'Production' -Verbose",
           "description": "PowerShell configuration script (requires installPowerShell: true)"
         }
       ]
@@ -117,8 +120,10 @@
         "touch /etc/template-marker-9000"
       ],
       "firstBootCommands": [
-        "echo 'Example: This runs on first boot of cloned VM'",
-        "systemctl restart networking"
+        "iptables -A INPUT -p tcp --dport 80 -j ACCEPT",
+        "iptables -A INPUT -p tcp --dport 443 -j ACCEPT",
+        "iptables -A INPUT -p tcp --dport 9000 -j ACCEPT",
+        "iptables-save > /etc/iptables/rules.v4"
       ]
     },
     {
