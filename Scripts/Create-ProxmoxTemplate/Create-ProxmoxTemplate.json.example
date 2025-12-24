@@ -76,7 +76,7 @@
       "password": "changeme",
       "nameserver": "8.8.8.8",
       "searchdomain": "example.com",
-      "sshkey": ""
+      "sshpublickey": ""
     }
   },
   "templates": [

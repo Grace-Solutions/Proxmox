@@ -13,7 +13,7 @@ Automated creation of Proxmox VM templates from cloud images with full customiza
 - **VirtIO RNG**: Hardware random number generator for improved entropy
 - **NUMA**: Non-Uniform Memory Access enabled for better multi-socket performance
 - **SPICE Enhancements**: Folder sharing and video streaming enabled by default
-- **iptables Firewall**: First-boot iptables rules for outbound internet, RFC1918/RFC6598 east-west, and inbound protection
+- **Two-Layer Firewall**: Proxmox VM-level security groups + OS-level fwutil iptables utility
 - **Dynamic Tags**: Automatic tagging with template type, OS, version, and features
 - **GitHub Script Integration**: Download and execute scripts from private GitHub repos on first boot
 - **Cloud-Init Configuration**: Full cloud-init support with user, password, SSH keys, network settings
@@ -47,6 +47,9 @@ sh Create-ProxmoxTemplate.sh
 
 # Process a specific VMID
 bash Create-ProxmoxTemplate.sh -v 9000
+
+# Force recreate: removes existing VM (disables protection if enabled) before creating
+bash Create-ProxmoxTemplate.sh -v 9000 --force
 
 # Use a different config file
 bash Create-ProxmoxTemplate.sh -c /path/to/config.json
@@ -108,7 +111,7 @@ See `Create-ProxmoxTemplate.json.example` for a full working configuration. Key 
       "password": "changeme",
       "nameserver": "8.8.8.8",
       "searchdomain": "example.com",
-      "sshkey": ""
+      "sshpublickey": ""
     }
   },
   "templates": [
@@ -149,9 +152,7 @@ See `Create-ProxmoxTemplate.json.example` for a full working configuration. Key 
       "packages": ["docker.io"],
       "virtCustomizeCommands": [],
       "firstBootCommands": [
-        "iptables -A INPUT -p tcp --dport 80 -j ACCEPT",
-        "iptables -A INPUT -p tcp --dport 443 -j ACCEPT",
-        "iptables-save > /etc/iptables/rules.v4"
+        "fwutil --public-tcp-ports 80,443,9000"
       ]
     }
   ]
@@ -231,7 +232,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
 | Field | Description | Default |
 |-------|-------------|---------|
 | `bridge` | Proxmox bridge (e.g., "vmbr0") | "vmbr0" |
-| `firewall` | Enable Proxmox VM-level firewall (0 or 1) | 0 |
+| `firewall` | Enable Proxmox VM-level firewall (0 or 1) | 1 |
 | `vlan` | VLAN tag (optional) | "" |
 | `ip` | Static IPv4 in CIDR format (e.g., "192.168.1.100/24") | "" (DHCP) |
 | `gateway` | IPv4 gateway (optional, used with static IP) | "" |
@@ -245,7 +246,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
 "network": [
     {
         "bridge": "vmbr0",
-        "firewall": 0,
+        "firewall": 1,
         "vlan": "",
         "ip": "192.168.1.100/24",
         "gateway": "192.168.1.1",
@@ -260,7 +261,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
 "network": [
     {
         "bridge": "vmbr0",
-        "firewall": 0,
+        "firewall": 1,
         "vlan": "",
         "ip": "192.168.1.100/24",
         "gateway": "192.168.1.1",
@@ -269,7 +270,7 @@ The `network` setting is an array of network adapter objects. Each adapter suppo
     },
     {
         "bridge": "vmbr1",
-        "firewall": 0,
+        "firewall": 1,
         "vlan": "100",
         "ip": "",
         "gateway": "",
@@ -466,58 +467,95 @@ Full list: `timedatectl list-timezones`
 | AlmaLinux 9 | `https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2` |
 | Fedora Cloud 39 | `https://download.fedoraproject.org/pub/fedora/linux/releases/39/Cloud/x86_64/images/Fedora-Cloud-Base-39-1.5.x86_64.qcow2` |
 
-## iptables Firewall
+## Firewall Utility (fwutil)
 
-Each template is configured with iptables firewall rules on first boot. The Proxmox VM-level firewall is **disabled** by default (`firewall: 0` on network adapters) - security is handled at the OS level via iptables.
+Each template includes the `fwutil` firewall utility installed at `/usr/local/bin/fwutil`. This comprehensive script configures iptables with Docker/container awareness.
 
-### Default Chain Policies
+### Features
 
-| Chain | Policy | Description |
-|-------|--------|-------------|
-| INPUT | DROP | Deny all inbound by default |
-| FORWARD | DROP | Deny all forwarding by default |
-| OUTPUT | DROP | Deny all outbound by default (explicit rules allow traffic) |
+- **Docker/Container Aware**: Preserves Docker, Podman, and container networking rules
+- **VPN Compatible**: Works with Netbird, Tailscale, ZeroTier, WireGuard
+- **RFC1918/RFC6598 Trusted**: Full access for private and CGNAT networks
+- **SSH Protection**: SSH restricted to private/CGNAT networks only (blocks public SSH)
+- **Rate Limiting**: SYN flood protection, connection limiting
+- **Port Scan Detection**: Blocks IPs scanning multiple ports
 
-### iptables Rules (Applied on First Boot)
+### Usage
 
-| Chain | Rule | Description |
-|-------|------|-------------|
-| INPUT/OUTPUT | `-i lo` / `-o lo` | Allow loopback interface |
-| INPUT/OUTPUT | `-m conntrack --ctstate ESTABLISHED,RELATED` | Allow established/related connections |
-| INPUT/OUTPUT | `-s/-d 10.0.0.0/8` | Allow RFC1918 Class A (east-west) |
-| INPUT/OUTPUT | `-s/-d 172.16.0.0/12` | Allow RFC1918 Class B (east-west) |
-| INPUT/OUTPUT | `-s/-d 192.168.0.0/16` | Allow RFC1918 Class C (east-west) |
-| INPUT/OUTPUT | `-s/-d 100.64.0.0/10` | Allow RFC6598 CGNAT (east-west) |
-| INPUT/OUTPUT | `-p icmp` | Allow ICMP (ping) |
-| OUTPUT | `-j ACCEPT` | Allow all outbound to internet (public routable) |
+```bash
+# Open HTTP, HTTPS, and custom port from public internet
+fwutil --public-tcp-ports 80,443,8080
 
-### Opening Additional Ports
+# Open TCP and UDP ports
+fwutil --public-tcp-ports 80,443 --public-udp-ports 53,123
 
-Use `firstBootCommands` to open specific inbound ports for services:
+# Open port ranges
+fwutil --public-tcp-ports 80,443,8000-8100
+```
+
+### Using in firstBootCommands
 
 ```json
 "firstBootCommands": [
-    "iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT",
-    "iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT",
-    "iptables -I INPUT 1 -p tcp --dport 9000 -j ACCEPT",
-    "iptables-save > /etc/iptables/rules.v4"
+    "fwutil --public-tcp-ports 80,443,9000"
 ]
 ```
 
-**Note:** Use `-I INPUT 1` to insert rules at the top of the chain (before the DROP rule).
+### Configuration Files
 
-### Cluster-Level Firewall Objects
+The utility also supports configuration files in its directory:
 
-The script also creates shared IPSets and Aliases at the Proxmox cluster level (`/etc/pve/firewall/cluster.fw`) for reference:
+| File | Purpose |
+|------|---------|
+| `secure-ranges.conf` | Additional trusted networks (one CIDR per line) |
+| `public-ports.conf` | Default public ports (`tcp:80`, `udp:53`, etc.) |
 
-| Type | Name | Value |
-|------|------|-------|
+## Proxmox Firewall (VM-Level)
+
+The script creates cluster-level firewall resources using the Proxmox API (`pvesh`). These work for both clustered and standalone hosts.
+
+### Cluster-Level Resources
+
+| Type | Name | Description |
+|------|------|-------------|
 | IPSet | `rfc1918` | 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 |
 | IPSet | `rfc6598` | 100.64.0.0/10 |
 | Alias | `rfc1918_class_a` | 10.0.0.0/8 |
 | Alias | `rfc1918_class_b` | 172.16.0.0/12 |
 | Alias | `rfc1918_class_c` | 192.168.0.0/16 |
 | Alias | `rfc6598_cgnat` | 100.64.0.0/10 |
+
+### Security Groups
+
+Two security groups are created and can be applied to VMs:
+
+**`inet-ew-allow`** (default):
+- Allow all outbound traffic
+- Allow inbound from RFC1918 private networks
+- Allow inbound from RFC6598 CGNAT
+- Allow ICMP ping
+- Allow DNS (TCP/UDP 53), DHCP (UDP 67/68), SSH (22)
+
+**`inet-ew-deny`**:
+- Deny outbound to RFC1918 (logged)
+- Deny outbound to RFC6598 (logged)
+- Allow outbound to internet
+- Deny inbound from RFC1918 (logged)
+- Deny inbound from RFC6598 (logged)
+- Allow ICMP ping
+- Allow DNS (TCP/UDP 53), DHCP (UDP 67/68), SSH (22)
+
+### VM Firewall Settings
+
+By default:
+- Security group `inet-ew-allow` is applied to each VM template
+- VM-level firewall is **enabled**
+- NIC-level firewall remains enabled
+
+To disable the VM firewall after cloning:
+```bash
+pvesh set /nodes/<node>/qemu/<vmid>/firewall/options --enable 0
+```
 
 ## Hardware Devices
 

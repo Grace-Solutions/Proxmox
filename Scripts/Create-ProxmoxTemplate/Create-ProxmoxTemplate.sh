@@ -75,6 +75,7 @@ Creates or updates Proxmox VM templates from cloud images.
 Options:
     -c, --config FILE       Configuration file path (default: ${SCRIPT_NAME}.json)
     -v, --vmid VMID         Process only this VMID (optional, processes all enabled if not specified)
+    -f, --force             Force recreation: remove existing VM (disables protection if enabled)
     -l, --log-file FILE     Log file path (optional)
     -d, --debug             Enable debug logging
     -h, --help              Show this help message
@@ -82,6 +83,7 @@ Options:
 Examples:
     $(basename "$0")
     $(basename "$0") -c custom-config.json -v 9001 -l /var/log/template.log
+    $(basename "$0") --force -v 9001    # Force recreate VM 9001
 EOF
     exit 0
 }
@@ -91,11 +93,13 @@ EOF
 # =============================================================================
 CONFIG_FILE="${SCRIPT_DIR}/${SCRIPT_NAME}.json"
 SINGLE_VMID=""
+FORCE_RECREATE="false"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         -c|--config)    CONFIG_FILE="$2"; shift 2 ;;
         -v|--vmid)      SINGLE_VMID="$2"; shift 2 ;;
+        -f|--force)     FORCE_RECREATE="true"; shift ;;
         -l|--log-file)  LOG_FILE="$2"; shift 2 ;;
         -d|--debug)     LOG_LEVEL="DEBUG"; shift ;;
         -h|--help)      usage ;;
@@ -258,7 +262,7 @@ load_config() {
     G_CI_PASSWORD=$(get_global "cloudInit.password")
     G_CI_NAMESERVER=$(get_global "cloudInit.nameserver")
     G_CI_SEARCHDOMAIN=$(get_global "cloudInit.searchdomain")
-    G_CI_SSHKEY=$(get_global "cloudInit.sshkey")
+    G_CI_SSHPUBLICKEY=$(get_global "cloudInit.sshpublickey")
 
     # Initialize root password (will be set per-template if random passwords enabled)
     G_ROOT_PASSWORD=""
@@ -292,22 +296,23 @@ load_template_config() {
     T_NET_COUNT=$(jq -r ".templates[$index].network | if type == \"array\" then length else 1 end" "$CONFIG_FILE")
     [[ -z "$T_NET_COUNT" || "$T_NET_COUNT" == "null" ]] && T_NET_COUNT=1
 
-    # Check if any network adapter has firewall enabled (for VM-level firewall state)
-    T_FIREWALL_ENABLED=$(jq -r ".templates[$index].network | if type == \"array\" then (if any(.[]; .firewall == 1) then \"1\" else \"0\" end) else \"1\" end" "$CONFIG_FILE")
-    [[ -z "$T_FIREWALL_ENABLED" || "$T_FIREWALL_ENABLED" == "null" ]] && T_FIREWALL_ENABLED="1"
+    # VM-level firewall settings
+    # Security group applied via orchestrator, VM firewall enabled by default
+    T_SECURITY_GROUP="inet-ew-allow"
+    T_VM_FIREWALL_ENABLED="1"
 
     # Cloud-init (use per-template if set, otherwise fall back to global)
     local ci_user=$(get_template_field "$index" "cloudInit.user")
     local ci_password=$(get_template_field "$index" "cloudInit.password")
     local ci_nameserver=$(get_template_field "$index" "cloudInit.nameserver")
     local ci_searchdomain=$(get_template_field "$index" "cloudInit.searchdomain")
-    local ci_sshkey=$(get_template_field "$index" "cloudInit.sshkey")
+    local ci_sshpublickey=$(get_template_field "$index" "cloudInit.sshpublickey")
 
     T_CI_USER="${ci_user:-$G_CI_USER}"
     T_CI_PASSWORD="${ci_password:-$G_CI_PASSWORD}"
     T_CI_NAMESERVER="${ci_nameserver:-$G_CI_NAMESERVER}"
     T_CI_SEARCHDOMAIN="${ci_searchdomain:-$G_CI_SEARCHDOMAIN}"
-    T_CI_SSHKEY="${ci_sshkey:-$G_CI_SSHKEY}"
+    T_CI_SSHPUBLICKEY="${ci_sshpublickey:-$G_CI_SSHPUBLICKEY}"
 
     # Generate random passwords if enabled
     T_ROOT_PASSWORD=""
@@ -724,9 +729,45 @@ vm_exists() {
     qm status "$vmid" &>/dev/null
 }
 
+is_protected() {
+    local vmid="$1"
+    qm config "$vmid" 2>/dev/null | grep -q "^protection: 1"
+}
+
 is_template() {
     local vmid="$1"
     qm config "$vmid" 2>/dev/null | grep -q "^template: 1"
+}
+
+# Force remove VM: disable protection if needed, convert from template if needed, then destroy
+force_remove_vm() {
+    local vmid="$1"
+
+    if ! vm_exists "$vmid"; then
+        log_debug "VM $vmid does not exist, nothing to remove"
+        return 0
+    fi
+
+    log_info "Force removing VM $vmid"
+
+    # Disable protection if enabled
+    if is_protected "$vmid"; then
+        log_info "Disabling protection on VM $vmid"
+        qm set "$vmid" --protection 0
+    fi
+
+    # Convert from template if needed (can't destroy a template directly)
+    if is_template "$vmid"; then
+        log_info "Converting VM $vmid from template before removal"
+        qm set "$vmid" --template 0
+    fi
+
+    # Stop if running
+    stop_vm "$vmid"
+
+    # Destroy the VM
+    log_info "Destroying VM $vmid"
+    qm destroy "$vmid" --purge
 }
 
 stop_vm() {
@@ -987,9 +1028,9 @@ configure_cloudinit() {
         qm set "$vmid" --"ipconfig${ip_i}" "$ipconfig"
     done
 
-    # SSH key requires special handling
-    if [[ -n "$T_CI_SSHKEY" ]]; then
-        echo "$T_CI_SSHKEY" > "/tmp/sshkey_${vmid}.pub"
+    # SSH public key requires special handling
+    if [[ -n "$T_CI_SSHPUBLICKEY" ]]; then
+        echo "$T_CI_SSHPUBLICKEY" > "/tmp/sshkey_${vmid}.pub"
         qm set "$vmid" --sshkeys "/tmp/sshkey_${vmid}.pub"
         rm -f "/tmp/sshkey_${vmid}.pub"
     fi
@@ -998,60 +1039,228 @@ configure_cloudinit() {
     qm set "$vmid" --boot "order=scsi1;scsi0;net0"
 }
 
-# Configure host-level firewall IPSets and Aliases (idempotent - shared across all VMs)
-# This creates reusable network definitions at the host level (works for standalone and cluster)
-configure_host_firewall() {
-    log_info "Configuring host-level firewall IPSets and Aliases (idempotent)"
+# =============================================================================
+# PROXMOX FIREWALL CONFIGURATION (via pvesh API)
+# =============================================================================
+# Creates cluster-level aliases, IPSets, and security groups that can be
+# applied to VM templates. Works for both clustered and standalone hosts.
 
-    local fw_dir="/etc/pve/firewall"
-    local host_fw="${fw_dir}/host.fw"
+# Get local node name
+get_local_node_name() {
+    hostname
+}
 
-    # Ensure firewall directory exists
-    mkdir -p "$fw_dir"
+# Check if host is in a cluster
+is_cluster_member() {
+    [[ -f "/etc/pve/corosync.conf" ]]
+}
 
-    # Check if host.fw exists and has our marker
-    if [[ -f "$host_fw" ]] && grep -q "# Managed by Proxmox Template Creator" "$host_fw"; then
-        log_debug "Host firewall already configured (skipping)"
+# Create cluster-level alias (idempotent - ignores if exists)
+create_cluster_alias() {
+    local name="$1"
+    local cidr="$2"
+    local comment="$3"
+
+    if pvesh get /cluster/firewall/aliases --output-format json 2>/dev/null | jq -e ".[] | select(.name == \"$name\")" >/dev/null 2>&1; then
+        log_debug "Alias '$name' already exists"
         return 0
     fi
 
-    # Backup existing host.fw if it exists and doesn't have our marker
-    if [[ -f "$host_fw" ]]; then
-        log_warn "Backing up existing host.fw to host.fw.bak"
-        cp "$host_fw" "${host_fw}.bak"
+    log_debug "Creating alias: $name ($cidr)"
+    pvesh create /cluster/firewall/aliases --name "$name" --cidr "$cidr" --comment "$comment" 2>/dev/null || true
+}
+
+# Create cluster-level IPSet (idempotent - ignores if exists)
+create_cluster_ipset() {
+    local name="$1"
+    local comment="$2"
+
+    if pvesh get /cluster/firewall/ipset --output-format json 2>/dev/null | jq -e ".[] | select(.name == \"$name\")" >/dev/null 2>&1; then
+        log_debug "IPSet '$name' already exists"
+        return 0
     fi
 
+    log_debug "Creating IPSet: $name"
+    pvesh create /cluster/firewall/ipset --name "$name" --comment "$comment" 2>/dev/null || true
+}
+
+# Add CIDR to IPSet (idempotent - ignores if exists)
+add_ipset_cidr() {
+    local ipset_name="$1"
+    local cidr="$2"
+    local comment="$3"
+
+    if pvesh get "/cluster/firewall/ipset/$ipset_name" --output-format json 2>/dev/null | jq -e ".[] | select(.cidr == \"$cidr\")" >/dev/null 2>&1; then
+        log_debug "CIDR '$cidr' already in IPSet '$ipset_name'"
+        return 0
+    fi
+
+    log_debug "Adding $cidr to IPSet $ipset_name"
+    pvesh create "/cluster/firewall/ipset/$ipset_name" --cidr "$cidr" --comment "$comment" 2>/dev/null || true
+}
+
+# Create security group (idempotent - ignores if exists)
+create_security_group() {
+    local name="$1"
+    local comment="$2"
+
+    if pvesh get /cluster/firewall/groups --output-format json 2>/dev/null | jq -e ".[] | select(.group == \"$name\")" >/dev/null 2>&1; then
+        log_debug "Security group '$name' already exists"
+        return 0
+    fi
+
+    log_debug "Creating security group: $name"
+    pvesh create /cluster/firewall/groups --group "$name" --comment "$comment" 2>/dev/null || true
+}
+
+# Add rule to security group (appends - check for duplicates by comment)
+add_security_group_rule() {
+    local group="$1"
+    local type="$2"      # in, out, group
+    local action="$3"    # ACCEPT, DROP, REJECT
+    local comment="$4"
+    shift 4
+    # Remaining args are optional: --proto, --source, --dest, --dport, --log, etc.
+
+    # Check if rule with same comment exists (simple idempotency)
+    if pvesh get "/cluster/firewall/groups/$group" --output-format json 2>/dev/null | jq -e ".[] | select(.comment == \"$comment\")" >/dev/null 2>&1; then
+        log_debug "Rule '$comment' already exists in group '$group'"
+        return 0
+    fi
+
+    log_debug "Adding rule to $group: $comment"
+    pvesh create "/cluster/firewall/groups/$group" --type "$type" --action "$action" --comment "$comment" --enable 1 "$@" 2>/dev/null || true
+}
+
+# Configure cluster-level firewall resources (aliases, IPSets, security groups)
+configure_cluster_firewall() {
+    log_info "Configuring cluster-level firewall resources (idempotent)"
+
+    local node_name=$(get_local_node_name)
+    local is_cluster=$(is_cluster_member && echo "yes" || echo "no")
+    log_debug "Local node: $node_name, Cluster member: $is_cluster"
+
     # -------------------------------------------------------------------------
-    # Create host-level firewall config with IPSets and Aliases
-    # These are shared across all VMs on this host and can be referenced in VM-level rules
+    # Create Aliases for private network ranges
     # -------------------------------------------------------------------------
+    log_info "Creating firewall aliases"
+    create_cluster_alias "rfc1918_class_a" "10.0.0.0/8" "RFC1918 Class A Private Network (10.0.0.0 - 10.255.255.255)"
+    create_cluster_alias "rfc1918_class_b" "172.16.0.0/12" "RFC1918 Class B Private Network (172.16.0.0 - 172.31.255.255)"
+    create_cluster_alias "rfc1918_class_c" "192.168.0.0/16" "RFC1918 Class C Private Network (192.168.0.0 - 192.168.255.255)"
+    create_cluster_alias "rfc6598_cgnat" "100.64.0.0/10" "RFC6598 Carrier-Grade NAT (100.64.0.0 - 100.127.255.255)"
 
-    cat > "$host_fw" << 'HOSTFW'
-# Managed by Proxmox Template Creator
-# Host-level firewall configuration with reusable IPSets and Aliases
-# These definitions are shared across all VMs on this Proxmox host
+    # -------------------------------------------------------------------------
+    # Create IPSets for grouped network ranges
+    # -------------------------------------------------------------------------
+    log_info "Creating firewall IPSets"
+    create_cluster_ipset "rfc1918" "RFC 1918 Private Address Space - All private IPv4 ranges"
+    add_ipset_cidr "rfc1918" "10.0.0.0/8" "Class A Private (10.0.0.0 - 10.255.255.255)"
+    add_ipset_cidr "rfc1918" "172.16.0.0/12" "Class B Private (172.16.0.0 - 172.31.255.255)"
+    add_ipset_cidr "rfc1918" "192.168.0.0/16" "Class C Private (192.168.0.0 - 192.168.255.255)"
 
-[OPTIONS]
-enable: 1
+    create_cluster_ipset "rfc6598" "RFC 6598 CGNAT Address Space - Carrier-Grade NAT"
+    add_ipset_cidr "rfc6598" "100.64.0.0/10" "CGNAT Range (100.64.0.0 - 100.127.255.255)"
 
-[ALIASES]
-# RFC 1918 Private Address Space Aliases
-rfc1918_class_a 10.0.0.0/8 # RFC1918 Class A Private Network (10.0.0.0 - 10.255.255.255)
-rfc1918_class_b 172.16.0.0/12 # RFC1918 Class B Private Network (172.16.0.0 - 172.31.255.255)
-rfc1918_class_c 192.168.0.0/16 # RFC1918 Class C Private Network (192.168.0.0 - 192.168.255.255)
-# RFC 6598 CGNAT Address Space Alias
-rfc6598_cgnat 100.64.0.0/10 # RFC6598 Carrier-Grade NAT (100.64.0.0 - 100.127.255.255)
+    # -------------------------------------------------------------------------
+    # Security Group 1: inet-ew-allow
+    # - Allow outbound to internet (all destinations)
+    # - Allow inbound/outbound east-west (RFC1918 + RFC6598)
+    # - Allow common services: DNS, DHCP, SSH, HTTP, HTTPS
+    # -------------------------------------------------------------------------
+    log_info "Creating security group: inet-ew-allow"
+    create_security_group "inet-ew-allow" "Allow internet access and east-west private network traffic"
 
-[IPSET rfc1918] # RFC 1918 Private Address Space - All private IPv4 ranges
-10.0.0.0/8 # Class A Private (10.0.0.0 - 10.255.255.255)
-172.16.0.0/12 # Class B Private (172.16.0.0 - 172.31.255.255)
-192.168.0.0/16 # Class C Private (192.168.0.0 - 192.168.255.255)
+    # Outbound: Allow all (internet + private)
+    add_security_group_rule "inet-ew-allow" "out" "ACCEPT" "Allow all outbound traffic"
 
-[IPSET rfc6598] # RFC 6598 CGNAT Address Space - Carrier-Grade NAT
-100.64.0.0/10 # CGNAT Range (100.64.0.0 - 100.127.255.255)
-HOSTFW
+    # Inbound: Allow from RFC1918 private networks
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow inbound from RFC1918" --source "+rfc1918"
 
-    log_info "Host-level firewall IPSets and Aliases configured"
+    # Inbound: Allow from RFC6598 CGNAT
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow inbound from RFC6598 CGNAT" --source "+rfc6598"
+
+    # Inbound: Allow ICMP (ping)
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow ICMP ping" --proto "icmp"
+
+    # Inbound: Allow DNS (TCP/UDP 53)
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow DNS TCP" --proto "tcp" --dport "53"
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow DNS UDP" --proto "udp" --dport "53"
+
+    # Inbound: Allow DHCP (UDP 67/68)
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow DHCP server" --proto "udp" --dport "67"
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow DHCP client" --proto "udp" --dport "68"
+
+    # Inbound: Allow SSH (TCP 22)
+    add_security_group_rule "inet-ew-allow" "in" "ACCEPT" "Allow SSH" --proto "tcp" --dport "22"
+
+    # -------------------------------------------------------------------------
+    # Security Group 2: inet-ew-deny
+    # - Allow outbound to internet (all destinations)
+    # - DENY inbound/outbound east-west (RFC1918 + RFC6598) with logging
+    # - Allow common services: DNS, DHCP, SSH (from public only)
+    # -------------------------------------------------------------------------
+    log_info "Creating security group: inet-ew-deny"
+    create_security_group "inet-ew-deny" "Allow internet access, deny east-west with logging"
+
+    # Outbound: Deny to private destinations first, then allow all
+    add_security_group_rule "inet-ew-deny" "out" "DROP" "Deny outbound to RFC1918 (logged)" --dest "+rfc1918" --log "warning"
+    add_security_group_rule "inet-ew-deny" "out" "DROP" "Deny outbound to RFC6598 (logged)" --dest "+rfc6598" --log "warning"
+    add_security_group_rule "inet-ew-deny" "out" "ACCEPT" "Allow outbound to internet"
+
+    # Inbound: Deny from private networks with logging
+    add_security_group_rule "inet-ew-deny" "in" "DROP" "Deny inbound from RFC1918 (logged)" --source "+rfc1918" --log "warning"
+    add_security_group_rule "inet-ew-deny" "in" "DROP" "Deny inbound from RFC6598 (logged)" --source "+rfc6598" --log "warning"
+
+    # Inbound: Allow ICMP (ping)
+    add_security_group_rule "inet-ew-deny" "in" "ACCEPT" "Allow ICMP ping" --proto "icmp"
+
+    # Inbound: Allow DNS (TCP/UDP 53)
+    add_security_group_rule "inet-ew-deny" "in" "ACCEPT" "Allow DNS TCP" --proto "tcp" --dport "53"
+    add_security_group_rule "inet-ew-deny" "in" "ACCEPT" "Allow DNS UDP" --proto "udp" --dport "53"
+
+    # Inbound: Allow DHCP (UDP 67/68)
+    add_security_group_rule "inet-ew-deny" "in" "ACCEPT" "Allow DHCP server" --proto "udp" --dport "67"
+    add_security_group_rule "inet-ew-deny" "in" "ACCEPT" "Allow DHCP client" --proto "udp" --dport "68"
+
+    # Inbound: Allow SSH (TCP 22)
+    add_security_group_rule "inet-ew-deny" "in" "ACCEPT" "Allow SSH" --proto "tcp" --dport "22"
+
+    log_info "Cluster-level firewall resources configured"
+}
+
+# Apply security group to VM and configure VM firewall options
+configure_vm_firewall() {
+    local vmid="$1"
+    local security_group="${2:-inet-ew-allow}"  # Default to allow east-west
+    local enable_firewall="${3:-0}"  # VM firewall disabled by default
+
+    local node_name=$(get_local_node_name)
+
+    log_info "Configuring VM $vmid firewall (group: $security_group, enabled: $enable_firewall)"
+
+    # Apply security group as a rule on the VM
+    # Check if security group rule already exists
+    if ! pvesh get "/nodes/$node_name/qemu/$vmid/firewall/rules" --output-format json 2>/dev/null | jq -e ".[] | select(.action == \"$security_group\")" >/dev/null 2>&1; then
+        log_debug "Adding security group '$security_group' to VM $vmid"
+        pvesh create "/nodes/$node_name/qemu/$vmid/firewall/rules" \
+            --type "group" \
+            --action "$security_group" \
+            --comment "Applied by Proxmox Template Creator" \
+            --enable 1 \
+            2>/dev/null || log_warn "Failed to apply security group to VM $vmid"
+    else
+        log_debug "Security group '$security_group' already applied to VM $vmid"
+    fi
+
+    # Set VM firewall options
+    log_debug "Setting VM firewall options (enable: $enable_firewall)"
+    pvesh set "/nodes/$node_name/qemu/$vmid/firewall/options" \
+        --enable "$enable_firewall" \
+        --policy_in "DROP" \
+        --policy_out "ACCEPT" \
+        --log_level_in "nolog" \
+        --log_level_out "nolog" \
+        2>/dev/null || log_warn "Failed to set VM firewall options for $vmid"
 }
 
 # Generate markdown notes for the VM
@@ -1136,6 +1345,7 @@ EOF
     echo "" >> "$notes_file"
     echo "- SSH root login is **enabled**" >> "$notes_file"
     echo "- Password authentication is **enabled**" >> "$notes_file"
+    echo "- **Proxmox Security Group**: \`${T_SECURITY_GROUP}\` (VM firewall: $([ "$T_VM_FIREWALL_ENABLED" == "1" ] && echo "enabled" || echo "disabled"))" >> "$notes_file"
     echo "- **fwutil** firewall utility installed at \`/usr/local/bin/fwutil\`" >> "$notes_file"
     echo "  - Docker/container aware (preserves container networking)" >> "$notes_file"
     echo "  - RFC1918/RFC6598 private networks: unrestricted access" >> "$notes_file"
@@ -1296,6 +1506,11 @@ process_template() {
     # Customize image (packages, users, etc)
     customize_image "$qcow2_file"
 
+    # Handle --force: remove existing VM before creating new one
+    if [[ "$FORCE_RECREATE" == "true" ]] && vm_exists "$vmid"; then
+        force_remove_vm "$vmid"
+    fi
+
     # Check if VM exists
     local is_new="true"
     if vm_exists "$vmid"; then
@@ -1318,8 +1533,11 @@ process_template() {
     # Configure cloud-init
     configure_cloudinit "$vmid" "$is_new"
 
-    # Configure host-level firewall IPSets (idempotent - only runs once)
-    configure_host_firewall
+    # Configure cluster-level firewall resources (idempotent - only runs once per script execution)
+    configure_cluster_firewall
+
+    # Apply security group to VM template (VM firewall disabled by default)
+    configure_vm_firewall "$vmid" "$T_SECURITY_GROUP" "$T_VM_FIREWALL_ENABLED"
 
     # Set dynamic tags
     set_vm_tags "$vmid" "$template_name" "$url"
