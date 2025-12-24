@@ -615,6 +615,46 @@ customize_image() {
         virt-customize -a "$image_file" --firstboot-command "snap install powershell --classic"
     fi
 
+    # Configure iptables firewall rules (before custom first boot commands)
+    # Rules: Loopback, Established, RFC1918/6598 east-west, Internet outbound, ICMP, Drop other inbound
+    # Note: iptables-persistent should be in globalSettings.templatePackages for persistence
+    log_info "Adding iptables firewall configuration as first boot commands"
+
+    # Flush existing rules and set chain policies
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -F && iptables -X && iptables -P INPUT DROP && iptables -P FORWARD DROP && iptables -P OUTPUT DROP"
+
+    # Allow loopback interface (INPUT and OUTPUT)
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A INPUT -i lo -j ACCEPT && iptables -A OUTPUT -o lo -j ACCEPT"
+
+    # Allow established and related connections (INPUT and OUTPUT)
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT && iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"
+
+    # Allow all RFC1918 inbound and outbound (east-west private network traffic)
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A INPUT -s 10.0.0.0/8 -j ACCEPT && iptables -A INPUT -s 172.16.0.0/12 -j ACCEPT && iptables -A INPUT -s 192.168.0.0/16 -j ACCEPT"
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT && iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT && iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT"
+
+    # Allow all RFC6598 CGNAT inbound and outbound (east-west CGNAT traffic)
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A INPUT -s 100.64.0.0/10 -j ACCEPT && iptables -A OUTPUT -d 100.64.0.0/10 -j ACCEPT"
+
+    # Allow ICMP (ping) inbound and outbound
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A INPUT -p icmp -j ACCEPT && iptables -A OUTPUT -p icmp -j ACCEPT"
+
+    # Allow all outbound to internet (public routable addresses - everything not RFC1918/6598)
+    # This covers HTTP, HTTPS, DNS, NTP, and all other internet-bound traffic
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables -A OUTPUT -j ACCEPT"
+
+    # Save iptables rules for persistence across reboots
+    virt-customize -a "$image_file" --firstboot-command \
+        "iptables-save > /etc/iptables/rules.v4"
+
     # Add per-template first boot commands
     if [[ ${#T_FIRSTBOOT_CMDS[@]} -gt 0 ]]; then
         log_info "Adding ${#T_FIRSTBOOT_CMDS[@]} per-template first boot command(s)"
@@ -646,6 +686,7 @@ customize_image() {
 
             local repopath=$(get_github_script_field "$s_idx" "repoPath")
             local s_description=$(get_github_script_field "$s_idx" "description")
+            local s_params=$(get_github_script_field "$s_idx" "params")
 
             local filename=$(basename "$repopath")
             local script_url="${GITHUB_ROOT_URL}/${GITHUB_USERNAME}/${GITHUB_REPO}/${GITHUB_CONTENTS}/${repopath}${GITHUB_QUERY}${GITHUB_BRANCH}"
@@ -654,6 +695,7 @@ customize_image() {
 
             log_debug "GitHub script: $filename"
             [[ -n "$s_description" ]] && log_debug "Description: $s_description"
+            [[ -n "$s_params" ]] && log_debug "Parameters: $s_params"
             log_debug "URL: $script_url"
 
             # Determine interpreter based on file extension
@@ -673,13 +715,14 @@ customize_image() {
                 curl_headers="${curl_headers} -H 'Authorization: Bearer ${GITHUB_TOKEN}'"
             fi
 
-            # Build execution command based on interpreter
+            # Build execution command based on interpreter (append params if provided)
             local exec_cmd
             if [[ -n "$interpreter" ]]; then
                 exec_cmd="${interpreter} '${script_path}'"
             else
                 exec_cmd="'${script_path}'"
             fi
+            [[ -n "$s_params" ]] && exec_cmd="${exec_cmd} ${s_params}"
 
             # Download the script, make executable, and execute with appropriate interpreter
             virt-customize -a "$image_file" --firstboot-command \
@@ -754,9 +797,9 @@ create_vm() {
         local firewall=$(get_network_field "$T_INDEX" "$net_i" "firewall")
         local vlan=$(get_network_field "$T_INDEX" "$net_i" "vlan")
 
-        # Defaults
+        # Defaults (firewall=0 by default, iptables rules handle security at VM level)
         [[ -z "$bridge" ]] && bridge="vmbr0"
-        [[ -z "$firewall" ]] && firewall="1"
+        [[ -z "$firewall" ]] && firewall="0"
 
         local net_opts="virtio,bridge=${bridge},firewall=${firewall}"
         [[ -n "$vlan" ]] && net_opts+=",tag=${vlan}"
@@ -983,36 +1026,41 @@ configure_cloudinit() {
     qm set "$vmid" --boot "order=scsi1;scsi0;net0"
 }
 
-# Configure VM firewall with IPSets and rules at VM level
-configure_firewall() {
-    local vmid="$1"
-    local fw_enabled="${2:-1}"
-
-    if [[ "$fw_enabled" == "1" ]]; then
-        log_info "Configuring firewall for VM $vmid (enabled)"
-    else
-        log_info "Configuring firewall for VM $vmid (disabled - rules created but inactive)"
-    fi
+# Configure cluster-level firewall IPSets and Aliases (idempotent - shared across all VMs)
+# This creates reusable network definitions at the datacenter/cluster level
+configure_cluster_firewall() {
+    log_info "Configuring cluster-level firewall IPSets and Aliases (idempotent)"
 
     local fw_dir="/etc/pve/firewall"
-    local vm_fw="${fw_dir}/${vmid}.fw"
+    local cluster_fw="${fw_dir}/cluster.fw"
 
     # Ensure firewall directory exists
     mkdir -p "$fw_dir"
 
+    # Check if cluster.fw exists and has our marker
+    if [[ -f "$cluster_fw" ]] && grep -q "# Managed by Proxmox Template Creator" "$cluster_fw"; then
+        log_debug "Cluster firewall already configured (skipping)"
+        return 0
+    fi
+
+    # Backup existing cluster.fw if it exists and doesn't have our marker
+    if [[ -f "$cluster_fw" ]]; then
+        log_warn "Backing up existing cluster.fw to cluster.fw.bak"
+        cp "$cluster_fw" "${cluster_fw}.bak"
+    fi
+
     # -------------------------------------------------------------------------
-    # Create VM-level firewall config with IPSets, Aliases, and Rules
+    # Create cluster-level firewall config with IPSets and Aliases
+    # These are shared across all VMs and can be referenced in VM-level rules
     # -------------------------------------------------------------------------
 
-    cat > "$vm_fw" << VMFW
+    cat > "$cluster_fw" << 'CLUSTERFW'
+# Managed by Proxmox Template Creator
+# Cluster-level firewall configuration with reusable IPSets and Aliases
+# These definitions are shared across all VMs in the cluster
+
 [OPTIONS]
-# VM Firewall Configuration
-# Created by Proxmox Template Creator
-enable: ${fw_enabled}
-policy_in: DROP
-policy_out: DROP
-log_level_in: info
-log_level_out: nolog
+enable: 0
 
 [ALIASES]
 # RFC 1918 Private Address Space Aliases
@@ -1029,93 +1077,9 @@ rfc6598_cgnat 100.64.0.0/10 # RFC6598 Carrier-Grade NAT (100.64.0.0 - 100.127.25
 
 [IPSET rfc6598] # RFC 6598 CGNAT Address Space - Carrier-Grade NAT
 100.64.0.0/10 # CGNAT Range (100.64.0.0 - 100.127.255.255)
+CLUSTERFW
 
-[IPSET public_internet] # Public Internet Address Space - All routable IPv4 addresses
-# Class A Public Ranges
-1.0.0.0/8 # Public Class A
-2.0.0.0/7 # Public
-4.0.0.0/6 # Public
-8.0.0.0/7 # Public
-11.0.0.0/8 # Public (DoD)
-12.0.0.0/6 # Public
-16.0.0.0/4 # Public
-32.0.0.0/3 # Public
-64.0.0.0/2 # Public (excludes 127.0.0.0/8 loopback)
-# Class B/C Public Ranges (excluding private)
-128.0.0.0/3 # Public (128-159)
-160.0.0.0/5 # Public (160-167)
-168.0.0.0/6 # Public (168-171)
-172.0.0.0/12 # Public (172.0-172.15, before private 172.16)
-172.32.0.0/11 # Public (172.32-172.63, after private 172.31)
-172.64.0.0/10 # Public (172.64-172.127)
-172.128.0.0/9 # Public (172.128-172.255)
-173.0.0.0/8 # Public
-174.0.0.0/7 # Public
-176.0.0.0/4 # Public (176-191)
-192.0.0.0/9 # Public (192.0-192.127)
-192.128.0.0/11 # Public (192.128-192.159)
-192.160.0.0/13 # Public (192.160-192.167)
-192.169.0.0/16 # Public (after private 192.168)
-192.170.0.0/15 # Public
-192.172.0.0/14 # Public
-192.176.0.0/12 # Public
-192.192.0.0/10 # Public
-193.0.0.0/8 # Public
-194.0.0.0/7 # Public
-196.0.0.0/6 # Public
-200.0.0.0/5 # Public
-208.0.0.0/4 # Public
-
-[RULES]
-# =============================================================================
-# RFC 1918 Private Network Traffic (Inbound/Outbound)
-# =============================================================================
-IN ACCEPT -source +rfc1918 -log nolog # Allow inbound from RFC1918 private networks
-OUT ACCEPT -dest +rfc1918 -log nolog # Allow outbound to RFC1918 private networks
-
-# =============================================================================
-# RFC 6598 CGNAT Traffic (Inbound/Outbound)
-# =============================================================================
-IN ACCEPT -source +rfc6598 -log nolog # Allow inbound from RFC6598 CGNAT
-OUT ACCEPT -dest +rfc6598 -log nolog # Allow outbound to RFC6598 CGNAT
-
-# =============================================================================
-# Outbound Internet Access (HTTP/HTTPS to public IPs only)
-# =============================================================================
-OUT ACCEPT -dest +public_internet -p tcp -dport 80 -log nolog # Allow HTTP to public internet
-OUT ACCEPT -dest +public_internet -p tcp -dport 443 -log nolog # Allow HTTPS to public internet
-
-# =============================================================================
-# ICMP (Ping) - Both Directions
-# =============================================================================
-IN ACCEPT -p icmp -log nolog # Allow ICMP inbound (ping, etc.)
-OUT ACCEPT -p icmp -log nolog # Allow ICMP outbound (ping, etc.)
-
-# =============================================================================
-# DHCP - Dynamic Host Configuration Protocol
-# =============================================================================
-IN ACCEPT -p udp -dport 67:68 -log nolog # Allow DHCP server responses
-OUT ACCEPT -p udp -dport 67:68 -log nolog # Allow DHCP client requests
-
-# =============================================================================
-# DNS - Domain Name System
-# =============================================================================
-IN ACCEPT -p udp -dport 53 -log nolog # Allow DNS UDP inbound
-IN ACCEPT -p tcp -dport 53 -log nolog # Allow DNS TCP inbound
-OUT ACCEPT -p udp -dport 53 -log nolog # Allow DNS UDP outbound
-OUT ACCEPT -p tcp -dport 53 -log nolog # Allow DNS TCP outbound
-
-# =============================================================================
-# SSH - Secure Shell (Inbound Only)
-# =============================================================================
-IN ACCEPT -p tcp -dport 22 -log nolog # Allow SSH inbound
-VMFW
-
-    if [[ "$fw_enabled" == "1" ]]; then
-        log_info "Firewall configured and enabled"
-    else
-        log_info "Firewall configured (rules created but disabled)"
-    fi
+    log_info "Cluster-level firewall IPSets and Aliases configured"
 }
 
 # Generate markdown notes for the VM
@@ -1182,14 +1146,15 @@ EOF
         echo "" >> "$notes_file"
         echo "## GitHub Scripts" >> "$notes_file"
         echo "" >> "$notes_file"
-        echo "| Repo Path | Description |" >> "$notes_file"
-        echo "|-----------|-------------|" >> "$notes_file"
+        echo "| Repo Path | Params | Description |" >> "$notes_file"
+        echo "|-----------|--------|-------------|" >> "$notes_file"
         for ((s_idx=0; s_idx<GITHUB_SCRIPTS_COUNT; s_idx++)); do
             local s_enabled=$(get_github_script_field "$s_idx" "enabled")
             [[ "$s_enabled" != "true" ]] && continue
             local s_repopath=$(get_github_script_field "$s_idx" "repoPath")
+            local s_params=$(get_github_script_field "$s_idx" "params")
             local s_description=$(get_github_script_field "$s_idx" "description")
-            echo "| ${s_repopath} | ${s_description:-N/A} |" >> "$notes_file"
+            echo "| ${s_repopath} | ${s_params:-N/A} | ${s_description:-N/A} |" >> "$notes_file"
         done
     fi
 
@@ -1199,11 +1164,15 @@ EOF
     echo "" >> "$notes_file"
     echo "- SSH root login is **enabled**" >> "$notes_file"
     echo "- Password authentication is **enabled**" >> "$notes_file"
-    if [[ "$T_FIREWALL_ENABLED" == "1" ]]; then
-        echo "- VM firewall is **enabled** (with security groups)" >> "$notes_file"
-    else
-        echo "- VM firewall is **disabled** (rules created but inactive)" >> "$notes_file"
-    fi
+    echo "- **iptables firewall** configured on first boot:" >> "$notes_file"
+    echo "  - Loopback: INPUT/OUTPUT allowed" >> "$notes_file"
+    echo "  - Established/Related: INPUT/OUTPUT allowed" >> "$notes_file"
+    echo "  - RFC1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16): INPUT/OUTPUT allowed" >> "$notes_file"
+    echo "  - RFC6598 (100.64.0.0/10): INPUT/OUTPUT allowed" >> "$notes_file"
+    echo "  - ICMP: INPUT/OUTPUT allowed" >> "$notes_file"
+    echo "  - Internet outbound: OUTPUT allowed (all public routable)" >> "$notes_file"
+    echo "  - All other inbound: **DROPPED**" >> "$notes_file"
+    echo "  - Open ports: \`iptables -I INPUT 1 -p tcp --dport PORT -j ACCEPT && iptables-save > /etc/iptables/rules.v4\`" >> "$notes_file"
     echo "- QEMU guest agent is **installed** (on first boot)" >> "$notes_file"
     if [[ "$T_INSTALL_POWERSHELL" == "true" ]]; then
         echo "- PowerShell is **installed** (via snap)" >> "$notes_file"
@@ -1380,8 +1349,8 @@ process_template() {
     # Configure cloud-init
     configure_cloudinit "$vmid" "$is_new"
 
-    # Configure VM firewall (state based on network adapter firewall settings)
-    configure_firewall "$vmid" "$T_FIREWALL_ENABLED"
+    # Configure cluster-level firewall IPSets (idempotent - only runs once)
+    configure_cluster_firewall
 
     # Set dynamic tags
     set_vm_tags "$vmid" "$template_name" "$url"
