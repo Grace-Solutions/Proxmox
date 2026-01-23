@@ -10,12 +10,12 @@ Download and execute directly on your Proxmox host:
 # Variables
 REPO="Grace-Solutions/Proxmox"
 BRANCH="main"
-SCRIPT_PATH="Scripts/Create-ProxmoxTemplate"
+REPO_DIR="Scripts/Create-ProxmoxTemplate"
 DEST_DIR="/opt/proxmox-templates"
-API_URL="https://api.github.com/repos/${REPO}/contents/${SCRIPT_PATH}?ref=${BRANCH}"
+API_URL="https://api.github.com/repos/${REPO}/contents/${REPO_DIR}?ref=${BRANCH}"
 
-# Create destination, download all files via API, make scripts executable, and run
-mkdir -p "${DEST_DIR}" && cd "${DEST_DIR}" && \
+# Create destination with mirrored folder structure, download all files via API, make scripts executable, and run
+mkdir -p "${DEST_DIR}/${REPO_DIR}" && cd "${DEST_DIR}/${REPO_DIR}" && \
 curl -sSL "${API_URL}" | jq -r '.[] | select(.type == "file") | .download_url' | \
 while read -r url; do curl -sSLO "$url"; done && \
 chmod +x *.sh && \
