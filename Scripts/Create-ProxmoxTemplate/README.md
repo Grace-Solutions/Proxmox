@@ -11,7 +11,7 @@ Download and execute directly on your Proxmox host:
 REPO="Grace-Solutions/Proxmox"
 BRANCH="main"
 REPO_DIR="Scripts/Create-ProxmoxTemplate"
-DEST_DIR="/opt/Github/${REPO}/${REPO_DIR}"
+DEST_DIR="/opt/Github/${REPO}/${REPO_DIR##*/}"
 
 # Install jq if not present
 command -v jq >/dev/null 2>&1 || apt-get install -y jq >/dev/null 2>&1
