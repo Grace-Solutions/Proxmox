@@ -12,17 +12,34 @@ REPO="Grace-Solutions/Proxmox"
 BRANCH="main"
 REPO_DIR="Scripts/Create-ProxmoxTemplate"
 DEST_DIR="/opt/proxmox-templates"
-API_URL="https://api.github.com/repos/${REPO}/contents/${REPO_DIR}?ref=${BRANCH}"
 
-# Create destination with mirrored folder structure, download all files via API, make scripts executable, and run
-mkdir -p "${DEST_DIR}/${REPO_DIR}" && cd "${DEST_DIR}/${REPO_DIR}" && \
-curl -sSL "${API_URL}" | jq -r '.[] | select(.type == "file") | .download_url' | \
-while read -r url; do curl -sSLO "$url"; done && \
-chmod +x *.sh && \
-bash Create-ProxmoxTemplate.sh
+# Install jq if not present
+command -v jq >/dev/null 2>&1 || apt-get install -y jq >/dev/null 2>&1
+
+# Recursive download function
+download_dir() {
+    local api_path="$1"
+    local local_path="$2"
+    mkdir -p "$local_path"
+    curl -sSL "https://api.github.com/repos/${REPO}/contents/${api_path}?ref=${BRANCH}" | \
+    jq -c '.[]' | while read -r item; do
+        type=$(echo "$item" | jq -r '.type')
+        name=$(echo "$item" | jq -r '.name')
+        if [ "$type" = "file" ]; then
+            curl -sSL "$(echo "$item" | jq -r '.download_url')" -o "${local_path}/${name}"
+        elif [ "$type" = "dir" ]; then
+            download_dir "${api_path}/${name}" "${local_path}/${name}"
+        fi
+    done
+}
+
+# Download, make scripts executable, and run
+download_dir "${REPO_DIR}" "${DEST_DIR}" && \
+find "${DEST_DIR}" -name "*.sh" -exec chmod +x {} \; && \
+cd "${DEST_DIR}" && bash Create-ProxmoxTemplate.sh
 ```
 
-> **Note:** Requires `jq` installed (`apt install jq`). Edit `Create-ProxmoxTemplate.json` before running to configure your templates.
+> **Note:** Edit `Create-ProxmoxTemplate.json` before running to configure your templates.
 
 ## Features
 
