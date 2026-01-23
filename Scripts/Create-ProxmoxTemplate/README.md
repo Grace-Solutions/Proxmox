@@ -20,12 +20,14 @@ command -v jq >/dev/null 2>&1 || apt-get install -y jq >/dev/null 2>&1
 download_dir() {
     local api_path="$1"
     local local_path="$2"
+    echo "Creating: ${local_path}"
     mkdir -p "$local_path"
     curl -sSL "https://api.github.com/repos/${REPO}/contents/${api_path}?ref=${BRANCH}" | \
     jq -c '.[]' | while read -r item; do
         type=$(echo "$item" | jq -r '.type')
         name=$(echo "$item" | jq -r '.name')
         if [ "$type" = "file" ]; then
+            echo "Downloading: ${name}"
             curl -sSL "$(echo "$item" | jq -r '.download_url')" -o "${local_path}/${name}"
         elif [ "$type" = "dir" ]; then
             download_dir "${api_path}/${name}" "${local_path}/${name}"
