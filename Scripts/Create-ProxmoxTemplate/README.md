@@ -2,6 +2,27 @@
 
 Automated creation of Proxmox VM templates from cloud images with full customization support.
 
+## Quick Start
+
+Download and execute directly on your Proxmox host:
+
+```bash
+# Variables
+REPO="Grace-Solutions/Proxmox"
+BRANCH="main"
+SCRIPT_PATH="Scripts/Create-ProxmoxTemplate"
+BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${SCRIPT_PATH}"
+
+# Download all files, make executable, and run
+curl -sSL "${BASE_URL}/Create-ProxmoxTemplate.sh" -o Create-ProxmoxTemplate.sh && \
+curl -sSL "${BASE_URL}/Create-ProxmoxTemplate.json.example" -o Create-ProxmoxTemplate.json && \
+curl -sSL "${BASE_URL}/fwutil.sh" -o fwutil.sh && \
+chmod +x Create-ProxmoxTemplate.sh && \
+bash Create-ProxmoxTemplate.sh
+```
+
+> **Note:** Edit `Create-ProxmoxTemplate.json` before running to configure your templates.
+
 ## Features
 
 - **Cloud Image Support**: Downloads and converts cloud images (Ubuntu, Debian, etc.) to Proxmox templates
