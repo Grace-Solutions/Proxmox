@@ -35,9 +35,10 @@ download_dir() {
     done
 }
 
-# Download and make scripts executable
+# Download, make scripts executable, and rename example config
 download_dir "${REPO_DIR}" "${DEST_DIR}" && \
-find "${DEST_DIR}" -name "*.sh" -exec chmod +x {} \;
+find "${DEST_DIR}" -name "*.sh" -exec chmod +x {} \; && \
+mv "${DEST_DIR}/Create-ProxmoxTemplate.json.example" "${DEST_DIR}/Create-ProxmoxTemplate.json"
 cd "${DEST_DIR}"
 # bash Create-ProxmoxTemplate.sh
 ```
