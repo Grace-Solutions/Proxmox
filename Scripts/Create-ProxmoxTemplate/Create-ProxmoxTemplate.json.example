@@ -59,15 +59,15 @@
       "scripts": [
         {
           "enabled": true,
-          "repoPath": "Scripts/PostDeploymentConfiguration.sh",
-          "params": "--environment production --verbose",
-          "description": "Post-deployment configuration script for VM setup"
+          "repoPath": "Customers/Personal/PostDeployment/PostDeploymentBootstrapper.sh",
+          "params": "",
+          "description": "Post deployment bootstrapper script"
         },
         {
           "enabled": false,
           "repoPath": "Scripts/ConfigureWindows.ps1",
           "params": "-Environment 'Production' -Verbose",
-          "description": "PowerShell configuration script (requires installPowerShell: true)"
+          "description": "PowerShell configuration script (requires installPowerShell: true). Works on Linux also."
         }
       ]
     },
@@ -81,10 +81,10 @@
   },
   "templates": [
     {
-      "enabled": false,
-      "vmid": "9000",
-      "name": "Template-Ubuntu-LTS-2204",
-      "imageUrl": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
+      "enabled": true,
+      "vmid": "9003",
+      "name": "Template-Ubuntu-LTS-2404-Current-Github",
+      "imageUrl": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
       "osDiskSize": "64G",
       "dataDiskSize": "128G",
       "timezone": "America/New_York",
@@ -92,11 +92,11 @@
       "installPowerShell": true,
       "github": {"enabled": true},
       "vmHardware": {
-        "cores": 16,
+        "cores": 8,
         "sockets": 1,
         "memory": 8192,
         "balloon": 4096,
-        "cpu": "x86-64-v3",
+        "cpu": "x86-64-v2-AES",
         "machine": "q35",
         "bios": "ovmf",
         "scsihw": "virtio-scsi-single",
@@ -104,7 +104,7 @@
       },
       "network": [
         {
-          "firewall": 1,
+          "firewall": 0,
           "bridge": "vmbr0",
           "gateway": "",
           "ip6": "",
@@ -115,75 +115,22 @@
       ],
       "cloudInit": {},
       "packages": [],
-      "virtCustomizeCommands": [
-        "echo 'Example: This runs during image customization'",
-        "touch /etc/template-marker-9000"
-      ],
-      "firstBootCommands": [
-        "fwutil --public-tcp-ports 80,443,9000,10000",
-        "curl -fsSL -o /tmp/webmin-setup-repo.sh https://raw.githubusercontent.com/webmin/webmin/master/webmin-setup-repo.sh",
-        "sh /tmp/webmin-setup-repo.sh --force",
-        "DEBIAN_FRONTEND=noninteractive apt-get update -y",
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y webmin --install-recommends",
-        "systemctl enable webmin",
-        "systemctl start webmin",
-        "rm -f /tmp/webmin-setup-repo.sh"
-      ]
+      "virtCustomizeCommands": [],
+      "firstBootCommands": []
     },
     {
       "enabled": true,
-      "vmid": "9001",
-      "name": "Template-Ubuntu-LTS-2404",
+      "vmid": "9004",
+      "name": "Template-Ubuntu-LTS-2404-Current-NoGithub",
       "imageUrl": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
-      "osDiskSize": "64G",
-      "dataDiskSize": "128G",
-      "timezone": "America/New_York",
-      "tags": ["ubuntu", "lts", "v24.04"],
-      "installPowerShell": true,
-      "github": {"enabled": true},
-      "vmHardware": {
-        "cores": 16,
-        "sockets": 1,
-        "memory": 8192,
-        "balloon": 4096,
-        "cpu": "x86-64-v3",
-        "machine": "q35",
-        "bios": "ovmf",
-        "scsihw": "virtio-scsi-single",
-        "ostype": "l26"
-      },
-      "network": [
-        {
-          "firewall": 1,
-          "bridge": "vmbr0",
-          "gateway": "",
-          "ip6": "",
-          "gateway6": "",
-          "ip": "",
-          "vlan": "20"
-        }
-      ],
-      "cloudInit": {},
-      "packages": ["docker.io"],
-      "virtCustomizeCommands": [],
-      "firstBootCommands": [
-        "systemctl enable docker",
-        "systemctl start docker"
-      ]
-    },
-    {
-      "enabled": false,
-      "vmid": "9002",
-      "name": "Template-Debian-12",
-      "imageUrl": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2",
       "osDiskSize": "64G",
       "dataDiskSize": "128G",
       "timezone": "America/New_York",
       "tags": [],
       "installPowerShell": true,
-      "github": {"enabled": true},
+      "github": {"enabled": false},
       "vmHardware": {
-        "cores": 16,
+        "cores": 8,
         "sockets": 1,
         "memory": 8192,
         "balloon": 4096,
@@ -195,7 +142,7 @@
       },
       "network": [
         {
-          "firewall": 1,
+          "firewall": 0,
           "bridge": "vmbr0",
           "gateway": "",
           "ip6": "",
@@ -205,13 +152,10 @@
         }
       ],
       "cloudInit": {},
-      "packages": ["htop", "iotop"],
-      "virtCustomizeCommands": [
-        "mkdir -p /opt/scripts",
-        "chmod 755 /opt/scripts"
-      ],
+      "packages": [],
+      "virtCustomizeCommands": [],
       "firstBootCommands": [
-        "apt-get update && apt-get upgrade -y"
+        "curl -fsSL -o /tmp/webmin-setup-repo.sh https://raw.githubusercontent.com/webmin/webmin/master/webmin-setup-repo.sh"
       ]
     }
   ]

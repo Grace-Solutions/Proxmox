@@ -110,6 +110,15 @@ done
 [[ ! -f "$CONFIG_FILE" ]] && error_exit "Configuration file not found: $CONFIG_FILE"
 
 # =============================================================================
+# BOOTSTRAP: Install jq first (required to parse config)
+# =============================================================================
+if ! command -v jq &>/dev/null; then
+    log_info "Installing jq (required for config parsing)"
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -y -qq jq >/dev/null 2>&1 || error_exit "Failed to install jq"
+fi
+
+# =============================================================================
 # JSON CONFIG PARSING
 # =============================================================================
 get_global() {
@@ -409,9 +418,40 @@ detect_storage() {
 }
 
 # =============================================================================
+# INSTALL ORCHESTRATOR PACKAGES
+# =============================================================================
+install_orchestrator_packages() {
+    if [[ ${#ORCHESTRATOR_PACKAGES[@]} -eq 0 ]]; then
+        log_debug "No orchestrator packages to install"
+        return 0
+    fi
+
+    # Find packages that are not installed
+    local missing_packages=()
+    for pkg in "${ORCHESTRATOR_PACKAGES[@]}"; do
+        if ! dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+            missing_packages+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing_packages[@]} -eq 0 ]]; then
+        log_debug "All orchestrator packages already installed"
+        return 0
+    fi
+
+    log_info "Installing ${#missing_packages[@]} orchestrator package(s): ${missing_packages[*]}"
+    apt-get update -qq >/dev/null 2>&1
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing_packages[@]}" >/dev/null 2>&1 || \
+        error_exit "Failed to install orchestrator packages: ${missing_packages[*]}"
+}
+
+# =============================================================================
 # VALIDATION
 # =============================================================================
 validate_config() {
+    # Install orchestrator packages first (includes virt-customize, virt-v2v, etc.)
+    install_orchestrator_packages
+
     # Auto-detect storage if not specified or set to "auto"/"automatic"
     if [[ -z "$STORAGE_POOL" || "$STORAGE_POOL" == "auto" || "$STORAGE_POOL" == "automatic" ]]; then
         STORAGE_POOL=$(detect_storage)
