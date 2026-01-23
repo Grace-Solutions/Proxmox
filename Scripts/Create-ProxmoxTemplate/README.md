@@ -33,10 +33,11 @@ download_dir() {
     done
 }
 
-# Download, make scripts executable, and run
+# Download and make scripts executable
 download_dir "${REPO_DIR}" "${DEST_DIR}" && \
-find "${DEST_DIR}" -name "*.sh" -exec chmod +x {} \; && \
-cd "${DEST_DIR}" && bash Create-ProxmoxTemplate.sh
+find "${DEST_DIR}" -name "*.sh" -exec chmod +x {} \;
+cd "${DEST_DIR}"
+# bash Create-ProxmoxTemplate.sh
 ```
 
 > **Note:** Edit `Create-ProxmoxTemplate.json` before running to configure your templates.
