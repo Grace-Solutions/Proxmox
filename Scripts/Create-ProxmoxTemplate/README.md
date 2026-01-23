@@ -11,17 +11,18 @@ Download and execute directly on your Proxmox host:
 REPO="Grace-Solutions/Proxmox"
 BRANCH="main"
 SCRIPT_PATH="Scripts/Create-ProxmoxTemplate"
-BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${SCRIPT_PATH}"
+DEST_DIR="/opt/proxmox-templates"
+API_URL="https://api.github.com/repos/${REPO}/contents/${SCRIPT_PATH}?ref=${BRANCH}"
 
-# Download all files, make executable, and run
-curl -sSL "${BASE_URL}/Create-ProxmoxTemplate.sh" -o Create-ProxmoxTemplate.sh && \
-curl -sSL "${BASE_URL}/Create-ProxmoxTemplate.json.example" -o Create-ProxmoxTemplate.json && \
-curl -sSL "${BASE_URL}/fwutil.sh" -o fwutil.sh && \
-chmod +x Create-ProxmoxTemplate.sh && \
+# Create destination, download all files via API, make scripts executable, and run
+mkdir -p "${DEST_DIR}" && cd "${DEST_DIR}" && \
+curl -sSL "${API_URL}" | jq -r '.[] | select(.type == "file") | .download_url' | \
+while read -r url; do curl -sSLO "$url"; done && \
+chmod +x *.sh && \
 bash Create-ProxmoxTemplate.sh
 ```
 
-> **Note:** Edit `Create-ProxmoxTemplate.json` before running to configure your templates.
+> **Note:** Requires `jq` installed (`apt install jq`). Edit `Create-ProxmoxTemplate.json` before running to configure your templates.
 
 ## Features
 
