@@ -1,0 +1,16 @@
+{
+  "pbsStorage": "auto",
+  "targetStorage": "auto",
+  "targetStorageMode": "round-robin",
+  "force": false,
+  "unique": false,
+  "start": false,
+  "pool": "",
+  "bwlimit": 0,
+  "restorations": [
+    { "enabled": true,  "vmid": 101 },
+    { "enabled": true,  "vmid": 102 },
+    { "enabled": true,  "notesRegex": "DOCKER-HOST-.*" },
+    { "enabled": false, "notesRegex": "DOCKER-SWARM-.*" }
+  ]
+}
