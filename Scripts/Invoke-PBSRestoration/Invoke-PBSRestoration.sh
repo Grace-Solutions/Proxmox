@@ -421,10 +421,10 @@ init_storage_pool() {
     fi
 }
 
+NEXT_STORAGE=""
 get_next_storage() {
-    local storage="${STORAGE_POOL_LIST[$STORAGE_POOL_INDEX]}"
+    NEXT_STORAGE="${STORAGE_POOL_LIST[$STORAGE_POOL_INDEX]}"
     STORAGE_POOL_INDEX=$(( (STORAGE_POOL_INDEX + 1) % ${#STORAGE_POOL_LIST[@]} ))
-    echo "$storage"
 }
 
 
@@ -708,8 +708,8 @@ main() {
         ctime_epoch=$(echo "$row" | base64 -d | jq -r '.ctime')
         ctime_human=$(date -u -d "@${ctime_epoch}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "$ctime_epoch")
 
-        local target_storage
-        target_storage=$(get_next_storage)
+        get_next_storage
+        local target_storage="$NEXT_STORAGE"
 
         log_info "------------------------------------------"
         log_progress "$current" "$restore_count" "VMID $vmid ($subtype) | Success: $success_count | Failed: $fail_count"
