@@ -496,6 +496,62 @@ guest_exists() {
     qm status "$vmid" &>/dev/null 2>&1 || pct status "$vmid" &>/dev/null 2>&1
 }
 
+# =============================================================================
+# TEMPLATE DETECTION AND VMID REMAPPING
+# =============================================================================
+# Cache cluster VM list once for repeated lookups
+CLUSTER_VM_CACHE=""
+
+init_cluster_vm_cache() {
+    if [[ -z "$CLUSTER_VM_CACHE" ]]; then
+        CLUSTER_VM_CACHE=$(pvesh get /cluster/resources --type vm --output-format json 2>/dev/null || echo "[]")
+        log_debug "Cached $(echo "$CLUSTER_VM_CACHE" | jq 'length') cluster VMs for template lookups"
+    fi
+}
+
+# Check if a guest name is a template:
+#   1. Name contains "template" (case-insensitive)  — OR —
+#   2. The VMID exists on the cluster with template == 1
+is_template_guest() {
+    local vmid="$1"
+    local notes="$2"
+
+    # Strip common prefixes from notes to get the clean name
+    local clean_name
+    clean_name=$(echo "$notes" | sed -E 's/^(VM|CT): //')
+
+    # Check name for "template" (case-insensitive)
+    if echo "$clean_name" | grep -qi "template"; then
+        return 0
+    fi
+
+    # Check if the VMID is a template object on the cluster
+    init_cluster_vm_cache
+    local is_tpl
+    is_tpl=$(echo "$CLUSTER_VM_CACHE" | jq --argjson id "$vmid" '[.[] | select(.vmid == $id and .template == 1)] | length')
+    if [[ "$is_tpl" -gt 0 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if a guest with the given name already exists on the cluster.
+# Returns the node it's on, or empty string if not found.
+find_existing_guest_by_name() {
+    local name="$1"
+
+    init_cluster_vm_cache
+    echo "$CLUSTER_VM_CACHE" | jq -r --arg n "$name" '
+        [.[] | select(.name == $n)] | first | .node // empty
+    '
+}
+
+# Get the next available VMID from the cluster
+get_next_vmid() {
+    pvesh get /cluster/nextid 2>/dev/null
+}
+
 stop_guest() {
     local vmid="$1"
     local subtype="$2"
@@ -708,6 +764,28 @@ main() {
         ctime_epoch=$(echo "$row" | base64 -d | jq -r '.ctime')
         ctime_human=$(date -u -d "@${ctime_epoch}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "$ctime_epoch")
 
+        # Template remap logic:
+        # If the backup is a template and a guest with the same name already exists
+        # on a DIFFERENT node in the cluster, generate a new VMID so both copies
+        # can coexist. If the template exists on the same node, let the normal
+        # force/skip logic handle it.
+        local original_vmid="$vmid"
+        local remap_reason=""
+        local clean_name
+        clean_name=$(echo "$notes" | sed -E 's/^(VM|CT): //')
+
+        if is_template_guest "$vmid" "$notes"; then
+            local existing_node
+            existing_node=$(find_existing_guest_by_name "$clean_name")
+            if [[ -n "$existing_node" && "$existing_node" != "$TARGET_NODE" ]]; then
+                local new_vmid
+                new_vmid=$(get_next_vmid)
+                remap_reason="Template '$clean_name' exists on $existing_node (VMID $vmid) — restoring to $TARGET_NODE as $new_vmid"
+                log_info "  REMAP: $remap_reason"
+                vmid="$new_vmid"
+            fi
+        fi
+
         get_next_storage
         local target_storage="$NEXT_STORAGE"
 
@@ -716,6 +794,7 @@ main() {
         log_info "  Backup:  $volid"
         log_info "  Date:    $ctime_human"
         log_info "  Notes:   $notes"
+        [[ -n "$remap_reason" ]] && log_info "  Remap:   $original_vmid -> $vmid ($remap_reason)"
         log_info "  Storage: $target_storage"
 
         local item_start=$SECONDS
