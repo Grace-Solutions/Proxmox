@@ -638,8 +638,8 @@ restore_guest() {
             stop_guest "$vmid" "$subtype"
             destroy_guest "$vmid" "$subtype"
         else
-            log_error "  $guest_label $vmid already exists. Use --force to overwrite."
-            return 1
+            log_warn "  $guest_label $vmid already exists — skipping (use --force to overwrite)"
+            return 2
         fi
     fi
 
@@ -751,6 +751,7 @@ main() {
     # Restore each selected backup
     local success_count=0
     local fail_count=0
+    local skip_count=0
     local current=0
 
     for row in $(echo "$selected_json" | jq -r '.[] | @base64'); do
@@ -790,7 +791,7 @@ main() {
         local target_storage="$NEXT_STORAGE"
 
         log_info "------------------------------------------"
-        log_progress "$current" "$restore_count" "VMID $vmid ($subtype) | Success: $success_count | Failed: $fail_count"
+        log_progress "$current" "$restore_count" "VMID $vmid ($subtype) | Success: $success_count | Skipped: $skip_count | Failed: $fail_count"
         log_info "  Backup:  $volid"
         log_info "  Date:    $ctime_human"
         log_info "  Notes:   $notes"
@@ -798,8 +799,12 @@ main() {
         log_info "  Storage: $target_storage"
 
         local item_start=$SECONDS
-        if restore_guest "$volid" "$vmid" "$subtype" "$target_storage" "$notes"; then
+        local restore_rc=0
+        restore_guest "$volid" "$vmid" "$subtype" "$target_storage" "$notes" || restore_rc=$?
+        if [[ "$restore_rc" -eq 0 ]]; then
             success_count=$((success_count + 1))
+        elif [[ "$restore_rc" -eq 2 ]]; then
+            skip_count=$((skip_count + 1))
         else
             fail_count=$((fail_count + 1))
         fi
@@ -813,6 +818,7 @@ main() {
     log_info "Restoration complete"
     log_info "  Total:      $restore_count"
     log_info "  Successful: $success_count"
+    log_info "  Skipped:    $skip_count"
     log_info "  Failed:     $fail_count"
     log_info "  Duration:   $(format_elapsed $total_elapsed)"
     log_info "=========================================="
