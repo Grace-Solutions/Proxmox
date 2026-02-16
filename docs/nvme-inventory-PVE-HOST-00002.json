@@ -1,0 +1,98 @@
+{
+  "host": "PVE-HOST-00002",
+  "ip": "172.16.16.171",
+  "generatedUtc": "2026-02-14",
+  "drives": [
+    {
+      "device": "nvme0n1",
+      "size": "3.7T",
+      "model": "JAJP600M4TB",
+      "serial": "C2525C6C07031101412",
+      "pcieAddress": "02:00.0",
+      "rootPort": "00:01.1",
+      "lane": "dedicated (CPU0 Port 1)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-JAJP600M4TB_C2525C6C07031101412",
+      "pool": "local-zfs-pool-00002-A",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme2n1",
+      "size": "3.7T",
+      "model": "JAJP600M4TB",
+      "serial": "C2525C6C03291102552",
+      "pcieAddress": "05:00.0",
+      "rootPort": "00:03.2",
+      "lane": "bifurcated lane 3 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-JAJP600M4TB_C2525C6C03291102552",
+      "pool": "local-zfs-pool-00002-A",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme4n1",
+      "size": "3.7T",
+      "model": "JAJP600M4TB",
+      "serial": "C2525C6C06301106343",
+      "pcieAddress": "06:00.0",
+      "rootPort": "00:03.3",
+      "lane": "bifurcated lane 4 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-JAJP600M4TB_C2525C6C06301106343",
+      "pool": "local-zfs-pool-00002-B",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme3n1",
+      "size": "3.6T",
+      "model": "WD_BLACK SN850X 4000GB",
+      "serial": "22521X801679",
+      "pcieAddress": "04:00.0",
+      "rootPort": "00:03.1",
+      "lane": "bifurcated lane 2 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s (downgraded from 16GT/s Gen4)",
+      "linkWidth": "x4",
+      "byId": "nvme-WD_BLACK_SN850X_4000GB_22521X801679",
+      "pool": "local-zfs-pool-00002-B",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme1n1",
+      "size": "119.2G",
+      "model": "SPCC M.2 PCIe SSD",
+      "serial": "WWDD250207007000445",
+      "pcieAddress": "03:00.0",
+      "rootPort": "00:03.0",
+      "lane": "bifurcated lane 1 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-SPCC_M.2_PCIe_SSD_WWDD250207007000445",
+      "pool": "rpool",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme5n1",
+      "size": "119.2G",
+      "model": "SPCC M.2 PCIe SSD",
+      "serial": "WWDD250207007000723",
+      "pcieAddress": "0a:00.0",
+      "rootPort": "00:1c.4",
+      "lane": "chipset (PCH)",
+      "linkSpeed": "5GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-SPCC_M.2_PCIe_SSD_WWDD250207007000723",
+      "pool": "rpool",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    }
+  ]
+}
+

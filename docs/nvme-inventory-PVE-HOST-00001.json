@@ -1,0 +1,98 @@
+{
+  "host": "PVE-HOST-00001",
+  "ip": "172.16.16.170",
+  "generatedUtc": "2026-02-14T14:30:00Z",
+  "drives": [
+    {
+      "device": "nvme0n1",
+      "size": "931.5G",
+      "model": "KINGSTON SNV2S1000G",
+      "serial": "50026B768638FBD6",
+      "pcieAddress": "81:00.0",
+      "rootPort": "80:01.0",
+      "lane": "dedicated (CPU1 Port 1)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-KINGSTON_SNV2S1000G_50026B768638FBD6",
+      "pool": "local-zfs-pool-00001-A",
+      "poolRole": "stripe member (RAID0)",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme1n1",
+      "size": "931.5G",
+      "model": "Sabrent Rocket Q",
+      "serial": "1348071406C700061907",
+      "pcieAddress": "02:00.0",
+      "rootPort": "00:01.1",
+      "lane": "dedicated (CPU0 Port 1)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-Sabrent_Rocket_Q_1348071406C700061907",
+      "pool": "local-zfs-pool-00001-A",
+      "poolRole": "stripe member (RAID0)",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme4n1",
+      "size": "953.9G",
+      "model": "INTEL SSDPEKNW010T8",
+      "serial": "BTNH905405DL1P0B",
+      "pcieAddress": "07:00.0",
+      "rootPort": "00:03.3",
+      "lane": "bifurcated lane 4 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-INTEL_SSDPEKNW010T8_BTNH905405DL1P0B",
+      "pool": "local-zfs-pool-00001-A",
+      "poolRole": "stripe member (RAID0)",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme3n1",
+      "size": "1.8T",
+      "model": "Samsung SSD 970 EVO Plus 2TB",
+      "serial": "S6S2NS0TC06438J",
+      "pcieAddress": "05:00.0",
+      "rootPort": "00:03.1",
+      "lane": "bifurcated lane 2 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-Samsung_SSD_970_EVO_Plus_2TB_S6S2NS0TC06438J",
+      "pool": "local-zfs-pool-00001-B",
+      "poolRole": "single disk",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme2n1",
+      "size": "119.2G",
+      "model": "SPCC M.2 PCIe SSD",
+      "serial": "A20250626N3128G00163",
+      "pcieAddress": "04:00.0",
+      "rootPort": "00:03.0",
+      "lane": "bifurcated lane 1 (CPU0 Port 3, IOU0)",
+      "linkSpeed": "8GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-SPCC_M.2_PCIe_SSD_A20250626N3128G00163",
+      "pool": "rpool",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    },
+    {
+      "device": "nvme5n1",
+      "size": "119.2G",
+      "model": "SPCC M.2 PCIe SSD",
+      "serial": "WWDD250207007003000",
+      "pcieAddress": "0b:00.0",
+      "rootPort": "00:1c.4",
+      "lane": "chipset (PCH)",
+      "linkSpeed": "5GT/s",
+      "linkWidth": "x4",
+      "byId": "nvme-SPCC_M.2_PCIe_SSD_WWDD250207007003000",
+      "pool": "rpool",
+      "poolRole": "mirror-0 member",
+      "status": "ONLINE"
+    }
+  ]
+}
+
